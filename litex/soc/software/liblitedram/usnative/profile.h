@@ -57,11 +57,25 @@
 #define USNATIVE_WR_ADDRESS sdram_dfii_pi3_address_write
 #define USNATIVE_WR_BANK sdram_dfii_pi3_baddress_write
 #define USNATIVE_WR_COMMAND command_p3
-#define USNATIVE_RD_ADDRESS sdram_dfii_pi3_address_write
-#define USNATIVE_RD_BANK sdram_dfii_pi3_baddress_write
-#define USNATIVE_RD_COMMAND command_p3
+#define USNATIVE_RD_ADDRESS sdram_dfii_pi2_address_write
+#define USNATIVE_RD_BANK sdram_dfii_pi2_baddress_write
+#define USNATIVE_RD_COMMAND command_p2
 #else
 #error "Unsupported USNative XEM8320 profile; high rates require explicit overclock configuration"
+#endif
+
+/* The 3200 routed profile resets its read-phase CSR to 3, but its trained
+ * operating phase is 2. Direct-DFII probes and controller traffic must agree.
+ * Bootstrap seeds only establish a starting point: all normal window, deskew,
+ * guard and final memory checks remain mandatory. */
+#if CONFIG_CLOCK_FREQUENCY == 400000000
+#define USNATIVE_RDPHASE 2
+#define USNATIVE_BOOT_TX_DELAY 72
+#define USNATIVE_BOOT_RX_DELAY 48
+#else
+#define USNATIVE_RDPHASE SDRAM_PHY_RDPHASE
+#define USNATIVE_BOOT_TX_DELAY 88
+#define USNATIVE_BOOT_RX_DELAY 32
 #endif
 
 #if CONFIG_CLOCK_FREQUENCY == 400000000

@@ -72,7 +72,7 @@ static int nb_boot(unsigned ck)
     if (ddrphy_tap_tx_count_read()!=ck) return 0;
     /* Clock moves only while the device is held reset. */
     ddrphy_bisc_only_write(0); init_sequence(); cdelay(10000);
-    ddrphy_rdphase_write(SDRAM_PHY_RDPHASE); ddrphy_wrphase_write(SDRAM_PHY_WRPHASE);
+    ddrphy_rdphase_write(USNATIVE_RDPHASE); ddrphy_wrphase_write(SDRAM_PHY_WRPHASE);
     ddrphy_tx_dqs_pre_write(0x55); ddrphy_tx_dqs_post_write(0x55);
     ddrphy_tx_dqs_idle_write(0x55);
     ddrphy_dly_sel_write(3);
@@ -87,7 +87,7 @@ static int nb_boot(unsigned ck)
     for (unsigned lane=0; lane<2; ++lane) {
         ddrphy_dly_sel_write(1<<lane); cdelay(100);
         if (ddrphy_wdly_dqs_inc_count_read()!=68) return 0;
-        if (!nb_delay(lane,88,1) || !nb_delay(lane,32,0)) return 0;
+        if (!nb_delay(lane,USNATIVE_BOOT_TX_DELAY,1) || !nb_delay(lane,USNATIVE_BOOT_RX_DELAY,0)) return 0;
     }
     return 1;
 }
@@ -143,13 +143,21 @@ static unsigned nb_calibrate(struct nb_result *result)
     ddrphy_training_error_write(0); ddrphy_training_stage_write(3);
     for (unsigned ck=0; ck<=128; ck+=8) {
         if (!nb_boot(ck)) return nb_fail(1);
-        if (nb_check(256,3)) run=0; else ++run;
+        unsigned errors=nb_check(256,3);
+        USNATIVE_DEBUG("NATIVE_CK tap=%u errors=%u\n",ck,errors);
+        if (errors) run=0; else ++run;
         if (run>best) { best=run; best_end=ck; }
     }
-    if (best<5) return nb_fail(6);
+    if (best<5) {
+        printf("Native CK window failed: samples=%u required=5 step=8\n",best);
+        return nb_fail(6);
+    }
     result->ck.first=best_end-8*(best-1); result->ck.last=best_end;
     result->ck.center=result->ck.first+8*((best-1)/2);
-    if (!nb_boot(result->ck.center) || nb_check(256,3)) return nb_fail(6);
+    if (!nb_boot(result->ck.center) || nb_check(256,3)) {
+        printf("Native CK center confirmation failed: center=%u\n",result->ck.center);
+        return nb_fail(6);
+    }
     ddrphy_training_stage_write(4);
     for (unsigned lane=0; lane<2; ++lane)
         if (!nb_center(lane,0,&result->rx[lane])) return nb_fail(7);

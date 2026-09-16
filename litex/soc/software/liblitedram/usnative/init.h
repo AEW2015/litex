@@ -25,7 +25,7 @@ static int sdram_usnative_init(void)
     }
 #endif
     printf("USNativeDDRPHY: XEM8320 x16, %u MT/s, RD%u/WR%u (experimental)\n",
-        sdram_get_freq()/1000000u, SDRAM_PHY_RDPHASE, SDRAM_PHY_WRPHASE);
+        sdram_get_freq()/1000000u, USNATIVE_RDPHASE, SDRAM_PHY_WRPHASE);
     printf("Standalone native burst calibration (experimental)\n");
     sdram_software_control_on();
     ddrphy_training_stage_write(1); ddrphy_training_error_write(0);

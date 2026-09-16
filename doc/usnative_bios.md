@@ -60,7 +60,8 @@ diagnostics are off.
 - 2666.667 MT/s: controller 333333333 Hz, CL19/CWL14, RD0/WR1.
 - Experimental 2933.333 MT/s: controller 366666666/7 Hz, CL21/CWL16,
   RD2/WR3; requires the overclock configuration.
-- Experimental 3200 MT/s: controller 400 MHz, CL24/CWL16, RD3/WR3;
+- Experimental 3200 MT/s: controller 400 MHz, CL24/CWL16, generated RD3/WR3,
+  operating RD2/WR3 after BIOS initialization;
   requires the overclock configuration.
 - Related sys:RIU clocks 2:1, acknowledged RIU bridge and registered tap-status
   freshness. Physical tap indices and nibble ownership match the existing
@@ -70,7 +71,8 @@ diagnostics are off.
   memory and missing required CSR capabilities fail at compile time.
 
 The firmware and PHY share one configuration: direct read/write commands use the
-same generated phase values as runtime phase selection. The SDRAM frequency API
+same operating phase as controller traffic. At 3200 MT/s the firmware
+selects read phase 2 rather than the generated CSR reset phase 3. The SDRAM frequency API
 returns an unsigned frequency so rates above 2147 MT/s display correctly.
 
 ## Validation and remaining integration
@@ -215,3 +217,20 @@ read-leveling windows are standard PHY half-windows, not HSSIO bit-slice eyes.
 The packaged 2933.333 and 3200 MT/s configurations have not yet completed
 hardware qualification. Both are overclock profiles and must remain explicitly
 opt-in.
+
+
+## 3200 MT/s bootstrap profile
+
+The 3200-only firmware profile selects read phase 2 for both direct-DFII probes
+and controller traffic, with initial TX DQ/DM delay 72 and RX delay 48. The
+matching XEM8320 target selects DQ EQ_LEVEL3 while leaving DQS at EQ_LEVEL2.
+Other speed profiles retain their existing phases, bootstrap delays and receiver
+settings. The BIOS banner reports the operating phase rather than its CSR reset.
+
+These seeds are not final calibrated taps: normal CK/RX/TX searches, per-bit
+read deskew, guards and the final memory test must still pass. CK failures now
+distinguish an insufficient passing window from failed center confirmation.
+Verbose per-CK error counts remain controlled by the native debug option.
+
+This is still an explicit experimental overclock. Successful functional tests
+do not remove the primitive clock violations or PLL VCO limit warning.

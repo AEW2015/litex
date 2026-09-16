@@ -38,6 +38,7 @@ class TestUSNativeFirmware(unittest.TestCase):
     def profile(self, rate=2400, extra="", check=""):
         clock, cl, cwl, rd, wr = {2400: (300000000,17,12,2,3), 2667: (333333333,19,14,0,1),
             2933: (366666666,21,16,2,3), 3200: (400000000,24,16,3,3)}[rate]
+        operating_rd = 2 if rate == 3200 else rd
         return f'''
 #define SDRAM_PHY_DDR4
 #define SDRAM_PHY_DATABITS 16
@@ -65,7 +66,10 @@ static void command_p1(unsigned value) {{ (void)value; selected=1; }}
 static void command_p2(unsigned value) {{ (void)value; selected=2; }}
 static void command_p3(unsigned value) {{ (void)value; selected=3; }}
 int main(void) {{
- USNATIVE_RD_COMMAND(1); if(selected!={rd}) return 1;
+ USNATIVE_RD_COMMAND(1); if(selected!={operating_rd}) return 1;
+ if(USNATIVE_RDPHASE!={operating_rd}) return 2;
+ if(USNATIVE_BOOT_TX_DELAY!={72 if rate == 3200 else 88}) return 3;
+ if(USNATIVE_BOOT_RX_DELAY!={48 if rate == 3200 else 32}) return 4;
  USNATIVE_WR_COMMAND(1);
  {check}
  return selected!={wr};
@@ -82,6 +86,14 @@ int main(void) {{
             with self.subTest(rate=rate):
                 self.compile_run(self.profile(rate), False)
                 self.compile_run(self.profile(rate, extra="#define CONFIG_SDRAM_USNATIVE_OVERCLOCK"))
+
+    def test_3200_operating_phase_is_independent_of_debug(self):
+        for debug in (False, True):
+            with self.subTest(debug=debug):
+                extra = "#define CONFIG_SDRAM_USNATIVE_OVERCLOCK\n"
+                if debug:
+                    extra += "#define CONFIG_SDRAM_USNATIVE_DEBUG\n"
+                self.compile_run(self.profile(3200, extra=extra))
 
     def test_reject_wrong_phase(self):
         self.compile_run(self.profile(extra="#undef SDRAM_PHY_RDPHASE\n#define SDRAM_PHY_RDPHASE 1"), False)
