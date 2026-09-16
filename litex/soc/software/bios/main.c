@@ -255,7 +255,7 @@ __attribute__((__used__)) int main(int i, char **c)
 	uint64_t supported_memory = sdram_get_supported_memory();
 	printf(ANSI_BOLD "SDRAM" ANSI_RESET ":\t\t");
 	litex_print_size(supported_memory);
-	printf(" %d-bit @ %dMT/s ",
+	printf(" %d-bit @ %uMT/s ",
 		sdram_get_databits(),
 		sdram_get_freq()/1000000);
 	printf("(CL-%d",
