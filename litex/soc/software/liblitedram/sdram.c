@@ -157,8 +157,8 @@ int sdram_get_databits(void) {
 	return SDRAM_PHY_DATABITS;
 }
 
-int sdram_get_freq(void) {
-	return SDRAM_PHY_XDR*SDRAM_PHY_PHASES*CONFIG_CLOCK_FREQUENCY;
+unsigned int sdram_get_freq(void) {
+	return (unsigned int)SDRAM_PHY_XDR*SDRAM_PHY_PHASES*CONFIG_CLOCK_FREQUENCY;
 }
 
 int sdram_get_cl(void) {
@@ -326,7 +326,9 @@ void sdram_software_control_on(void) {
 	/* Switch DFII to software control */
 	if (previous != DFII_CONTROL_SOFTWARE) {
 		sdram_dfii_control_write(DFII_CONTROL_SOFTWARE);
+#if !defined(CONFIG_SDRAM_USNATIVE_XEM8320) || defined(CONFIG_SDRAM_USNATIVE_DEBUG)
 		printf("Switching SDRAM to software control.\n");
+#endif
 	}
 
 #if CSR_DDRPHY_EN_VTC_ADDR
@@ -341,7 +343,9 @@ void sdram_software_control_off(void) {
 	/* Switch DFII to hardware control */
 	if (previous != DFII_CONTROL_HARDWARE) {
 		sdram_dfii_control_write(DFII_CONTROL_HARDWARE);
+#if !defined(CONFIG_SDRAM_USNATIVE_XEM8320) || defined(CONFIG_SDRAM_USNATIVE_DEBUG)
 		printf("Switching SDRAM to hardware control.\n");
+#endif
 	}
 #if CSR_DDRPHY_EN_VTC_ADDR
 	/* Enable Voltage/Temperature compensation */
@@ -1065,7 +1069,13 @@ int sdram_write_leveling(void) {
 	int cdly_range_end;
 	int cdly_range_step;
 
+#ifndef CONFIG_SDRAM_USNATIVE_XEM8320
 	_sdram_tck_taps = ddrphy_half_sys8x_taps_read()*4;
+#else
+	/* Native calibration uses measured windows, not this component-PHY CSR. */
+	printf("Use sdram_init for USNative calibration.\n");
+	return 0;
+#endif
 	printf("  tCK equivalent taps: %d\n", _sdram_tck_taps);
 
 	/* First align CK/CMD against DQS. This makes the later per-module data
@@ -1699,6 +1709,10 @@ int sdram_leveling(void) {
  * This file surrounds that fixed sequence with PHY reset/training and LiteX
  * controller status reporting.
  */
+#ifdef CONFIG_SDRAM_USNATIVE_XEM8320
+#include "usnative/init.h"
+#endif
+
 int sdram_init(void) {
 	printf("Initializing SDRAM @0x%08lx...\n", MAIN_RAM_BASE);
 
@@ -1707,7 +1721,17 @@ int sdram_init(void) {
 	ddrctrl_init_error_write(0);
 #endif // CSR_DDRCTRL_BASE
 
-#ifdef CONFIG_SDRAM_CUSTOM_INIT
+#ifdef CONFIG_SDRAM_USNATIVE_XEM8320
+	if (!sdram_usnative_init()) {
+		/* Keep failed memory isolated; readiness alone cannot authorize traffic. */
+		nb_fail(ddrphy_training_error_read() ? ddrphy_training_error_read() : 1);
+#ifdef CSR_DDRCTRL_BASE
+		ddrctrl_init_error_write(1);
+		ddrctrl_init_done_write(1);
+#endif
+		return 0;
+	}
+#elif defined(CONFIG_SDRAM_CUSTOM_INIT)
 	/* Some memories require board-level power or a device-specific training
 	 * flow that cannot be represented by the generated generic sequence. */
 	if (!sdram_custom_init()) {
@@ -1765,6 +1789,9 @@ int sdram_init(void) {
 #ifndef SDRAM_TEST_DISABLE
 	/* Final software smoke test before marking DDRCTRL init_done. */
 	if(!memtest((unsigned int *) MAIN_RAM_BASE_VA, MEMTEST_DATA_SIZE)) {
+#ifdef CONFIG_SDRAM_USNATIVE_XEM8320
+		nb_fail(20); /* Retraining is required after a failed final memory test. */
+#endif
 #ifdef CSR_DDRCTRL_BASE
 		ddrctrl_init_error_write(1);
 		ddrctrl_init_done_write(1);
