@@ -99,10 +99,19 @@ contract. No thermal or runtime background retraining is included.
 The board target's `--with-dma` selects `CONFIG_SDRAM_NATIVE_DMA_TEST`, which
 compiles the optional `native_dma` BIOS command. This is explicit destructive
 bandwidth/integrity testing after normal calibration, not automatic DMA-based
-calibration refinement. Its 128/256-bit width-converted ports are distinct from
-the older paired-port engine used by `CONFIG_SDRAM_USNATIVE_DMA_CALIBRATION`.
-Write and read rates are reported independently, using hardware cycle counts;
-percentage efficiency uses the physical x16 DDR peak rather than DMA port width.
+calibration refinement. The default engine uses a 128/256-bit width-converted
+native port. Write and read rates are reported independently, using hardware
+cycle counts; percentage efficiency uses the physical x16 DDR peak rather than
+DMA port width.
+
+When the target selects `CONFIG_SDRAM_NATIVE_DMA_BANK_GROUP_INTERLEAVING`, the
+same command reports `mode=paired-bank-group-interleaved`. This opt-in hardware
+uses two 128-bit bank-group streams as one 256-bit benchmark interface and waits
+for both write paths to drain before starting reads. A sticky error from either
+stream prevents further traffic through the engine. The standard native-port
+mode remains the default, and neither mode enables automatic startup DMA
+calibration unless the separate `CONFIG_SDRAM_USNATIVE_DMA_CALIBRATION` option
+is selected.
 
 The 2933.333 and 3200 profiles require `CONFIG_SDRAM_USNATIVE_OVERCLOCK` in
 addition to the native profile. Their CL/CWL and read-gate delays differ from

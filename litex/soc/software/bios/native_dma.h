@@ -10,6 +10,7 @@
 #include <system.h>
 #include <generated/soc.h>
 #include <generated/sdram_phy.h>
+#include "native_dma_mode.h"
 static void native_dma_rate(const char *direction,unsigned beats,unsigned cycles)
 {
     unsigned bytes_per_beat=dma_bench_data_width_read()/8;
@@ -44,8 +45,8 @@ static void native_dma_handler(int nb_params,char **params)
        ddrphy_training_error_read() || ddrphy_bisc_only_read()) {
         printf("DMA refused: DDR training has not passed\n");return;
     }
-    printf("Native DMA: addr=%08lx bytes=%lu pattern=%s read_only=%lu width=%u fifo=%u clock=%u Hz\n",
-        address,length,random ? "PRBS31" : "counter",read_only,
+    printf("Native DMA: mode=%s addr=%08lx bytes=%lu pattern=%s read_only=%lu width=%u fifo=%u clock=%u Hz\n",
+        NATIVE_DMA_MODE_NAME,address,length,random ? "PRBS31" : "counter",read_only,
         (unsigned)dma_bench_data_width_read(),
         (unsigned)dma_bench_fifo_depth_read(), CONFIG_CLOCK_FREQUENCY);
     /* Prevent deferred CPU writes from modifying DMA data. */
@@ -70,8 +71,8 @@ static void native_dma_handler(int nb_params,char **params)
         (unsigned)dma_bench_first_error_offset_read());
     unsigned expected=length/(dma_bench_data_width_read()/8);
     int pass=!fault && !errors && reads==expected && writes==(read_only?0:expected);
-    printf("DMA_RESULT %s addr=%08lx bytes=%lu pattern=%lu read_only=%lu\n",
-        pass?"PASS":"FAIL",address,length,random,read_only);
+    printf("DMA_RESULT %s mode=%s addr=%08lx bytes=%lu pattern=%lu read_only=%lu\n",
+        pass?"PASS":"FAIL",NATIVE_DMA_MODE_NAME,address,length,random,read_only);
     if(fault>=3) printf("DMA fatal fault: reconfigure FPGA before further DDR use\n");
 }
 define_command_args(native_dma,native_dma_handler,"Native-width DDR DMA throughput and integrity test (destructive)",
