@@ -11,7 +11,7 @@ extern "C" {
 /* Constants                                                             */
 /*-----------------------------------------------------------------------*/
 int sdram_get_databits(void);
-int sdram_get_freq(void);
+unsigned int sdram_get_freq(void);
 int sdram_get_cl(void);
 int sdram_get_cwl(void);
 
