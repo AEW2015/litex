@@ -142,20 +142,30 @@ static unsigned nb_calibrate(struct nb_result *result)
     unsigned run=0, best=0, best_end=0;
     ddrphy_training_error_write(0); ddrphy_training_stage_write(3);
     for (unsigned ck=0; ck<=128; ck+=8) {
-        if (!nb_boot(ck)) return nb_fail(1);
+        if (!nb_boot(ck)) {
+            printf("Native CK initialization failed: tap=%u\n",ck);
+            return nb_fail(1);
+        }
         unsigned errors=nb_check(256,3);
         USNATIVE_DEBUG("NATIVE_CK tap=%u errors=%u\n",ck,errors);
         if (errors) run=0; else ++run;
         if (run>best) { best=run; best_end=ck; }
     }
     if (best<5) {
-        printf("Native CK window failed: samples=%u required=5 step=8\n",best);
+        printf("Native CK window failed: samples=%u last=%u required=5 step=8\n",best,best_end);
         return nb_fail(6);
     }
     result->ck.first=best_end-8*(best-1); result->ck.last=best_end;
     result->ck.center=result->ck.first+8*((best-1)/2);
-    if (!nb_boot(result->ck.center) || nb_check(256,3)) {
-        printf("Native CK center confirmation failed: center=%u\n",result->ck.center);
+    if (!nb_boot(result->ck.center)) {
+        printf("Native CK center initialization failed: window=[%u..%u] center=%u\n",
+            result->ck.first,result->ck.last,result->ck.center);
+        return nb_fail(6);
+    }
+    unsigned errors=nb_check(256,3);
+    if (errors) {
+        printf("Native CK center burst failed: window=[%u..%u] center=%u errors=%u\n",
+            result->ck.first,result->ck.last,result->ck.center,errors);
         return nb_fail(6);
     }
     ddrphy_training_stage_write(4);

@@ -234,3 +234,26 @@ Verbose per-CK error counts remain controlled by the native debug option.
 
 This is still an explicit experimental overclock. Successful functional tests
 do not remove the primitive clock violations or PLL VCO limit warning.
+
+
+## Full retries and explicit BISC diagnostics
+
+`sdram_init` always runs full native training and the final controller memory
+test, including after a failed attempt. The safe `bisc_only` CSR state left by
+failure no longer selects the next operation. Existing CSR-based debug scripts
+must use `sdram_bisc` to request the internal-delay diagnostic explicitly.
+`sdram_bisc` is available only with native debug firmware, holds DDR reset and
+software DFI ownership, and leaves DDR/DMA unavailable even on a BISC PASS.
+Use `sdram_init` afterward to restore memory operation.
+
+CK errors retain their numeric codes and report distinct initialization,
+insufficient-window, center-initialization and center-burst failures. Per-tap
+error counts remain debug-only. No passing-window or guard requirement changes.
+
+Matching XEM8320 targets provide software DMA admission for both PHYs. Full
+initialization revokes admission and grants it only after the controller memory
+test succeeds; builds disabling that test cannot grant DMA admission. Explicit
+DMA-assisted native calibration briefly grants access inside the refinement
+step and revokes it on return, including failure. PHY readiness, training state,
+DFI ownership and sticky hardware faults remain additional hardware gates.
+Fatal DMA faults still require FPGA reconfiguration.

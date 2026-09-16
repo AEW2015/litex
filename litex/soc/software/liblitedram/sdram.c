@@ -1730,9 +1730,9 @@ done:
 int sdram_init(void) {
 	printf("Initializing SDRAM @0x%08lx...\n", MAIN_RAM_BASE);
 
-/* Component PHY DMA has no USNative training-state CSR to inspect. Revoke
- * software admission before reinitialization and grant it only after the final
- * controller-path memory test passes. */
+/* Revoke DMA admission before every full initialization and grant it only
+ * after the final controller-path memory test passes. Native DMA refinement,
+ * when explicitly enabled, grants bounded access inside its training step. */
 #ifdef CONFIG_SDRAM_DMA_SOFTWARE_ADMISSION
 	dma_bench_software_ready_write(0);
 #endif
@@ -1852,7 +1852,7 @@ int sdram_init(void) {
 #ifdef CSR_DDRCTRL_BASE
 	ddrctrl_init_done_write(1);
 #endif // CSR_DDRCTRL_BASE
-#ifdef CONFIG_SDRAM_DMA_SOFTWARE_ADMISSION
+#if defined(CONFIG_SDRAM_DMA_SOFTWARE_ADMISSION) && !defined(SDRAM_TEST_DISABLE)
 	dma_bench_software_ready_write(1);
 	printf("SDRAM initialization PASS\n");
 #endif

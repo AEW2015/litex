@@ -6,10 +6,10 @@
 #ifndef __BIOS_NATIVE_DMA_ADMISSION_H
 #define __BIOS_NATIVE_DMA_ADMISSION_H
 
-/* Keep the benchmark command independent of PHY-specific CSR layouts.  The
- * USNative PHY exposes hardware training state.  Component PHY builds instead
- * use a software-owned bit that sdram_init grants after standard leveling and
- * a successful final controller-path memory test. */
+/* Keep the benchmark command independent of PHY-specific CSR layouts. New
+ * targets use software admission after the final controller memory test, in
+ * addition to their hardware PHY/fault gates. Retain the training-state path
+ * for older USNative targets without the software admission CSR. */
 static inline int native_dma_admission_ready(void)
 {
 #ifdef CONFIG_SDRAM_DMA_SOFTWARE_ADMISSION

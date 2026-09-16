@@ -14,9 +14,6 @@
 
 static int sdram_usnative_init(void)
 {
-#ifdef CONFIG_SDRAM_USNATIVE_DEBUG
-    unsigned bisc_only=ddrphy_bisc_only_read();
-#endif
 #ifdef CONFIG_SDRAM_USNATIVE_DMA_CALIBRATION
     if (dma_bench_data_width_read() != 256) {
         printf("USNative calibration requires 256-bit paired DMA.\n");
@@ -33,23 +30,6 @@ static int sdram_usnative_init(void)
     ddrphy_debug_clear_write(1);
 #endif
     cdelay(1000);
-#ifdef CONFIG_SDRAM_USNATIVE_DEBUG
-    if (bisc_only) {
-        if (!nb_bisc()) {
-            nb_fail(1);
-            printf("Native BISC timeout: DLY=%02x VTC=%02x\n",
-                (unsigned)ddrphy_dly_rdy_read(), (unsigned)ddrphy_vtc_rdy_read());
-            return 0;
-        }
-        ddrphy_training_stage_write(2); USNATIVE_SNAPSHOT();
-        printf("Native BISC PASS: DLY=%02x VTC=%02x debug=%08x first_dly=%u first_vtc=%u\n",
-            (unsigned)ddrphy_dly_rdy_read(), (unsigned)ddrphy_vtc_rdy_read(),
-            (unsigned)ddrphy_debug_read(), (unsigned)ddrphy_first_dly_read(),
-            (unsigned)ddrphy_first_vtc_read());
-        printf("BISC-only mode: DDR held reset; memory training/test not run.\n");
-        return 0;
-    }
-#endif
     struct nb_result result;
     unsigned error=nb_calibrate(&result);
     if (error) {
@@ -64,7 +44,15 @@ static int sdram_usnative_init(void)
         return 0;
     }
 #ifdef CONFIG_SDRAM_USNATIVE_DMA_CALIBRATION
+    /* Only explicitly requested internal training may use DMA before the
+     * final CPU memory test. Revoke admission on both success and failure. */
+#ifdef CONFIG_SDRAM_DMA_SOFTWARE_ADMISSION
+    dma_bench_software_ready_write(1);
+#endif
     error=nd_dma_refine(rx_centers);
+#ifdef CONFIG_SDRAM_DMA_SOFTWARE_ADMISSION
+    dma_bench_software_ready_write(0);
+#endif
     if(error) {
         printf("Native DMA RX refinement failed: error=%u\n",error);
         return 0;
@@ -83,3 +71,33 @@ static int sdram_usnative_init(void)
     printf("Native calibration PASS: direct bursts, per-bit RX deskew and +/-4-tap guards; BIOS memory test follows.\n");
     return 1;
 }
+
+#ifdef CONFIG_SDRAM_USNATIVE_DEBUG
+/* An explicit diagnostic operation, never inferred from a previous failure.
+ * A BISC pass says nothing about DDR: retain software ownership and DDR reset. */
+int sdram_usnative_bisc(void)
+{
+#ifdef CONFIG_SDRAM_DMA_SOFTWARE_ADMISSION
+    dma_bench_software_ready_write(0);
+#endif
+#ifdef CSR_DDRCTRL_BASE
+    ddrctrl_init_done_write(0);
+    ddrctrl_init_error_write(0);
+#endif
+    sdram_software_control_on();
+    ddrphy_training_stage_write(1);
+    ddrphy_training_error_write(0);
+    printf("USNative BISC-only diagnostic: DDR held reset; no memory training/test.\n");
+    if (!nb_bisc()) {
+        nb_fail(1);
+        printf("Native BISC timeout: DLY=%02x VTC=%02x\n",
+            (unsigned)ddrphy_dly_rdy_read(), (unsigned)ddrphy_vtc_rdy_read());
+        return 0;
+    }
+    ddrphy_training_stage_write(2);
+    USNATIVE_SNAPSHOT();
+    printf("Native BISC PASS: DLY=%02x VTC=%02x; DDR/DMA remain unavailable.\n",
+        (unsigned)ddrphy_dly_rdy_read(), (unsigned)ddrphy_vtc_rdy_read());
+    return 1;
+}
+#endif
