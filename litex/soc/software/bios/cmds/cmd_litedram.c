@@ -206,7 +206,14 @@ define_command(sdram_init, sdram_init, "Initialize SDRAM (Init + Calibration)", 
  */
 static void sdram_test_handler(int nb_params, char **params)
 {
+#ifdef CONFIG_SDRAM_DMA_SOFTWARE_ADMISSION
+	unsigned int was_ready = dma_bench_software_ready_read();
+	dma_bench_software_ready_write(0);
+	int ok = memtest((unsigned int *)MAIN_RAM_BASE_VA, MAIN_RAM_SIZE/32);
+	dma_bench_software_ready_write(was_ready && ok ? 1 : 0);
+#else
 	memtest((unsigned int *)MAIN_RAM_BASE_VA, MAIN_RAM_SIZE/32);
+#endif
 }
 define_command(sdram_test, sdram_test_handler, "Test SDRAM", LITEDRAM_CMDS);
 
@@ -219,6 +226,11 @@ define_command(sdram_test, sdram_test_handler, "Test SDRAM", LITEDRAM_CMDS);
 #if defined(CSR_DDRPHY_BASE)
 static void sdram_cal_handler(int nb_params, char **params)
 {
+#ifdef CONFIG_SDRAM_DMA_SOFTWARE_ADMISSION
+	/* Leveling alone does not validate normal controller traffic.  Keep DMA
+	 * closed until a complete sdram_init calibration and memory test runs. */
+	dma_bench_software_ready_write(0);
+#endif
 	sdram_software_control_on();
 	sdram_leveling();
 	sdram_software_control_off();

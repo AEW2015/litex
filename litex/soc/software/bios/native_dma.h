@@ -8,9 +8,12 @@
  * region until completion. Rates use hardware cycles, not UART/CPU timing.
  */
 #include <system.h>
+#include <libbase/timeout.h>
 #include <generated/soc.h>
 #include <generated/sdram_phy.h>
+#include "native_dma_admission.h"
 #include "native_dma_mode.h"
+#include "native_dma_timeout.h"
 static void native_dma_rate(const char *direction,unsigned beats,unsigned cycles)
 {
     unsigned bytes_per_beat=dma_bench_data_width_read()/8;
@@ -41,9 +44,8 @@ static void native_dma_handler(int nb_params,char **params)
     if(dma_bench_busy_read() || dma_bench_fault_read()>=3) {
         printf("DMA unavailable: busy or fatal fault; reconfigure FPGA after fatal fault\n");return;
     }
-    if(!ddrphy_ready_read() || ddrphy_training_stage_read()!=5 ||
-       ddrphy_training_error_read() || ddrphy_bisc_only_read()) {
-        printf("DMA refused: DDR training has not passed\n");return;
+    if(!native_dma_admission_ready()) {
+        printf("DMA refused: SDRAM calibration and memory test have not passed\n");return;
     }
     printf("Native DMA: mode=%s addr=%08lx bytes=%lu pattern=%s read_only=%lu width=%u fifo=%u clock=%u Hz\n",
         NATIVE_DMA_MODE_NAME,address,length,random ? "PRBS31" : "counter",read_only,
@@ -53,11 +55,13 @@ static void native_dma_handler(int nb_params,char **params)
     flush_cpu_dcache();flush_l2_cache();
     dma_bench_base_write(address-MAIN_RAM_BASE);dma_bench_length_write(length);
     dma_bench_random_write(random);dma_bench_read_only_write(read_only);
-    dma_bench_timeout_write(1000000000);dma_bench_start_write(1);
-    /* CSR bus latency exceeds the start/reset sequence; done is cleared by start. */
-    unsigned poll_limit=10000000;
-    while(!dma_bench_done_read() && --poll_limit) {}
-    if(!poll_limit) {
+    dma_bench_timeout_write(NATIVE_DMA_HW_TIMEOUT_CYCLES);dma_bench_start_write(1);
+    /* The DMA engine owns the primary cycle timeout. This outer deadline
+     * catches missing completion reporting without depending on CPU speed. */
+    struct timeout completion_timeout;
+    timeout_start(&completion_timeout, native_dma_completion_timeout_us());
+    while(!dma_bench_done_read() && !timeout_expired(&completion_timeout)) {}
+    if(!dma_bench_done_read()) {
         printf("DMA completion timeout: reconfigure FPGA before further DDR use\n");
         return;
     }

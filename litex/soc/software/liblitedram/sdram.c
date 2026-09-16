@@ -28,9 +28,17 @@
 #include <liblitedram/accessors.h>
 
 //#define SDRAM_TEST_DISABLE
-//#define SDRAM_WRITE_LEVELING_CMD_DELAY_DEBUG
-//#define SDRAM_WRITE_LATENCY_CALIBRATION_DEBUG
+#ifdef CONFIG_SDRAM_PHY_DEBUG
+/* Opt-in component-PHY detail: show command-delay scans and write-latency
+ * calibration samples. Normal read/write leveling summaries remain unchanged. */
+#define SDRAM_WRITE_LEVELING_CMD_DELAY_DEBUG
+#define SDRAM_WRITE_LATENCY_CALIBRATION_DEBUG
+#endif
 //#define SDRAM_LEVELING_SCAN_DISPLAY_HEX_DIV 10
+
+#if defined(CONFIG_SDRAM_DMA_SOFTWARE_ADMISSION) && defined(SDRAM_TEST_DISABLE)
+#error "Software DMA admission requires the final SDRAM memory test"
+#endif
 
 /*
  * SDRAM startup overview:
@@ -1716,6 +1724,13 @@ int sdram_leveling(void) {
 int sdram_init(void) {
 	printf("Initializing SDRAM @0x%08lx...\n", MAIN_RAM_BASE);
 
+/* Component PHY DMA has no USNative training-state CSR to inspect. Revoke
+ * software admission before reinitialization and grant it only after the final
+ * controller-path memory test passes. */
+#ifdef CONFIG_SDRAM_DMA_SOFTWARE_ADMISSION
+	dma_bench_software_ready_write(0);
+#endif
+
 #ifdef CSR_DDRCTRL_BASE
 	ddrctrl_init_done_write(0);
 	ddrctrl_init_error_write(0);
@@ -1768,6 +1783,15 @@ int sdram_init(void) {
 	/* Stop normal controller ownership and put the PHY into a clean state before
 	 * the JEDEC sequence touches the DRAM. */
 	sdram_software_control_on();
+#if (defined(SDRAM_PHY_USDDRPHY) || defined(SDRAM_PHY_USPDDRPHY)) && \
+	defined(SDRAM_PHY_WRITE_LEVELING_CAPABLE) && \
+	defined(CSR_DDRPHY_WDLY_DQS_INC_COUNT_ADDR)
+	/* UltraScale global PHY reset clears DQ ODELAY but leaves the DQS ODELAY
+	 * increment count unchanged. Wrap DQS to its base delay first so the DQ
+	 * reset and software-tracked DQS offset start leveling coherently. */
+	for (i=0; i<SDRAM_PHY_MODULES; i++)
+		sdram_leveling_action(i, 0, write_rst_dqs_delay);
+#endif
 #if CSR_DDRPHY_RST_ADDR
 	ddrphy_rst_write(1);
 	cdelay(1000);
@@ -1803,6 +1827,10 @@ int sdram_init(void) {
 #ifdef CSR_DDRCTRL_BASE
 	ddrctrl_init_done_write(1);
 #endif // CSR_DDRCTRL_BASE
+#ifdef CONFIG_SDRAM_DMA_SOFTWARE_ADMISSION
+	dma_bench_software_ready_write(1);
+	printf("SDRAM initialization PASS\n");
+#endif
 
 	return 1;
 }
