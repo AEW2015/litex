@@ -18,13 +18,13 @@ CC = shutil.which(os.environ.get("CC", "gcc"))
 
 @unittest.skipUnless(CC, "Host C compiler required")
 class TestUSNativeFirmware(unittest.TestCase):
-    def compile_run(self, code, success=True):
+    def compile_run(self, code, success=True, extra_flags=()):
         with tempfile.TemporaryDirectory(prefix="usnative_bios_") as temporary:
             directory = Path(temporary)
             source = directory / "test.c"
             binary = directory / ("test.exe" if os.name == "nt" else "test")
             source.write_text(code)
-            result = subprocess.run([CC, "-std=c99", "-Werror=implicit-function-declaration",
+            result = subprocess.run([CC, "-std=c99", "-Werror=implicit-function-declaration", *extra_flags,
                 "-I", str(INCLUDE), "-I", str(BIOS_INCLUDE), str(source), "-o", str(binary)],
                 capture_output=True, text=True, timeout=60)
             if not success:
@@ -91,6 +91,51 @@ int main(void) {{
 
     def test_dma_opt_in_requires_engine(self):
         self.compile_run(self.profile(extra="#define CONFIG_SDRAM_USNATIVE_DMA_CALIBRATION"), False)
+
+    def test_dma_opt_in_profile_is_independent_of_debug(self):
+        dma = r'''
+#undef MAIN_RAM_SIZE
+#define MAIN_RAM_SIZE 0x08000000
+#define CONFIG_SDRAM_USNATIVE_DMA_CALIBRATION
+#define CONFIG_SDRAM_NATIVE_DMA_TEST
+#define CONFIG_SDRAM_NATIVE_DMA_BANK_GROUP_INTERLEAVING
+#define CSR_DMA_BENCH_START_ADDR 1
+#define CSR_DMA_BENCH_DQ_ERROR_MASK_ADDR 1
+#define CSR_DMA_BENCH_DATA_WIDTH_ADDR 1
+'''
+        self.compile_run(self.profile(extra=dma,
+            check='USNATIVE_DEBUG("debug disabled\\n");'))
+        self.compile_run(self.profile(extra="#include <stdio.h>\n#define CONFIG_SDRAM_USNATIVE_DEBUG\n" + dma,
+            check='USNATIVE_DEBUG("debug enabled\\n");'))
+        self.compile_run(self.profile(extra=dma.replace(
+            "#define CONFIG_SDRAM_NATIVE_DMA_BANK_GROUP_INTERLEAVING\n", "")), False)
+
+    def test_dma_refinement_compiles_with_debug_on_and_off(self):
+        source = r'''
+#include <stdint.h>
+#include <stdio.h>
+#define __USNATIVE_DMA_IO_H
+static unsigned nd_program(unsigned *centers, unsigned lanes, int offset)
+    {(void)centers;(void)lanes;(void)offset;return 1;}
+static unsigned nb_fail(unsigned error) {return error;}
+static unsigned nd_dma_check(unsigned random, unsigned readonly)
+    {(void)random;(void)readonly;return 0;}
+static uint32_t dma_bench_dq_error_mask_read(void) {return 0;}
+static void ddrphy_training_stage_write(unsigned stage) {(void)stage;}
+#define USNATIVE_SNAPSHOT() do {} while (0)
+#ifdef TEST_DEBUG
+#define USNATIVE_DEBUG(...) printf(__VA_ARGS__)
+#else
+#define USNATIVE_DEBUG(...) do {} while (0)
+#endif
+#include "native_dma_calibration.h"
+int main(void) {unsigned centers[16]={0};return nd_dma_refine(centers);}
+'''
+        flags = ("-Wall", "-Wformat=2", "-Werror=format",
+                 "-Werror=unused-variable", "-Werror=unused-but-set-variable")
+        self.compile_run(source, extra_flags=flags)
+        self.compile_run("#define TEST_DEBUG\n#define CONFIG_SDRAM_USNATIVE_DEBUG\n" + source,
+            extra_flags=flags)
 
     def test_dma_benchmark_reports_selected_hardware_mode(self):
         self.compile_run(r'''
@@ -272,8 +317,8 @@ int main(void) {
 #define MAIN_RAM_BASE_VA MAIN_RAM_BASE
 #define MEMTEST_DATA_SIZE 64
 #define false 0
-static unsigned memory_ok=1, admission=9, admission_writes, tests, initialized, events;
-static char order[16];
+static unsigned memory_ok=1, dqs_ok=1, leveling_ok=1, admission=9, admission_writes, tests, initialized, events;
+static char order[64];
 static void dma_bench_software_ready_write(unsigned value) {admission=value;++admission_writes;}
 static void ddrctrl_init_done_write(unsigned value) {(void)value;}
 static void ddrctrl_init_error_write(unsigned value) {(void)value;}
@@ -281,10 +326,12 @@ static void sdram_write_leveling_rst_cmd_delay(unsigned value) {(void)value;}
 static void sdram_write_leveling_rst_dat_delay(unsigned module, unsigned show) {(void)module;(void)show;}
 static void sdram_software_control_on(void) {order[events++]='O';}
 static void sdram_software_control_off(void) {}
-static int sdram_leveling(void) {return 1;}
-static void sdram_leveling_action(int module, int dq, int action) {
- assert(module>=0 && module<2 && dq==0 && action==write_rst_dqs_delay);
- order[events++]=module?'1':'0';
+static int sdram_leveling(void) {return leveling_ok;}
+static int selected;
+static void sdram_select(int module, int dq) {assert(dq==0);selected=module;}
+static void sdram_deselect(int module, int dq) {assert(module==selected && dq==0);}
+static int write_rst_dqs_delay_checked(int module) {
+ assert(module==selected); order[events++]=module?'1':'0'; return dqs_ok;
 }
 static void ddrphy_rst_write(unsigned value) {order[events++]=value?'R':'r';}
 static void cdelay(unsigned value) {(void)value;order[events++]='D';}
@@ -297,6 +344,46 @@ int main(void) {
  assert(events>=8 && !memcmp(order, "O01RDrDJ", 8));
  memory_ok=0;
  assert(!sdram_init() && admission==0 && admission_writes==3 && tests==2 && initialized==2);
+ memory_ok=1; dqs_ok=0;
+ assert(!sdram_init() && admission==0 && admission_writes==4 && tests==2 && initialized==2);
+ dqs_ok=1; leveling_ok=0;
+ assert(!sdram_init() && admission==0 && admission_writes==5 && tests==2 && initialized==3);
+ return 0;
+}
+""")
+
+    def test_write_leveling_failure_stops_later_training(self):
+        source = (ROOT / "litex/soc/software/liblitedram/sdram.c").read_text()
+        start = source.index("int sdram_leveling(void) {")
+        function = source[start:source.index("\n}\n", start) + 3]
+        self.compile_run(r"""
+#include <assert.h>
+#include <stdio.h>
+#define SDRAM_PHY_MODULES 1
+#define DQ_COUNT 1
+#define SDRAM_PHY_WRITE_LEVELING_CAPABLE
+#define SDRAM_PHY_WRITE_LATENCY_CALIBRATION_CAPABLE
+#define SDRAM_PHY_WRITE_DQ_DQS_TRAINING_CAPABLE
+#define SDRAM_PHY_READ_LEVELING_CAPABLE
+static unsigned write_ok, write_calls, latency_calls, write_dq_calls, read_calls, released;
+static void write_rst_delay(int module) {(void)module;}
+static void read_rst_dq_delay(int module) {(void)module;}
+static void sdram_leveling_action(int module, int dq, void (*action)(int)) {(void)dq;action(module);}
+static void sdram_software_control_on(void) {}
+static void sdram_software_control_off(void) {released++;}
+static int sdram_write_leveling(void) {write_calls++;return write_ok;}
+static void sdram_write_latency_calibration(void) {latency_calls++;}
+static void sdram_write_dq_dqs_training(void) {write_dq_calls++;}
+static void sdram_read_leveling(void) {read_calls++;}
+""" + function + r"""
+int main(void) {
+ assert(!sdram_leveling());
+ assert(write_calls==1 && !latency_calls && !write_dq_calls && !read_calls);
+ assert(released==1);
+ write_ok=1;
+ assert(sdram_leveling());
+ assert(write_calls==2 && latency_calls==1 && write_dq_calls==1 && read_calls==1);
+ assert(released==2);
  return 0;
 }
 """)

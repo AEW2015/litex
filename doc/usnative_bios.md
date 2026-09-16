@@ -113,6 +113,14 @@ mode remains the default, and neither mode enables automatic startup DMA
 calibration unless the separate `CONFIG_SDRAM_USNATIVE_DMA_CALIBRATION` option
 is selected.
 
+The board's explicit `--usnative-dma-calibration` option selects that firmware
+refinement only when USNative, DMA, paired bank-group scheduling, and a 256-bit
+DMA interface are all enabled. It is independent of `--usnative-debug`: debug
+controls verbose scan output, while DMA calibration controls the destructive
+counter/PRBS refinement itself. The default remains disabled. The refinement
+uses scratch memory through `0x44ffffff`, requires the paired engine's per-DQ
+error-mask CSR, and runs during `sdram_init` before the final BIOS memory test.
+
 The optional command also supports component `USPDDRPHY` builds. These select
 `CONFIG_SDRAM_DMA_SOFTWARE_ADMISSION` and provide the
 `dma_bench_software_ready` CSR. `sdram_init()` clears admission before each
@@ -131,6 +139,16 @@ delay back to its base before asserting the global PHY reset. The global reset
 clears DQ output delay, so this preparation keeps the DQ and software-tracked
 DQS offsets coherent when leveling starts again. It does not affect the
 USNative initialization path.
+
+The restoration loop is bounded to one complete delay range. A status counter
+that does not advance now fails initialization before global reset or JEDEC
+commands instead of hanging. The standard leveling wrapper also propagates an
+existing write-leveling failure and skips later training, the final memory test,
+and DMA admission. Host tests inject both failures and verify those control
+paths; normal hardware testing exercised the candidate without injecting a PHY
+fault. Write-latency, write DQ-DQS, and read-leveling routines still expose void
+or otherwise incomplete stage results, so full per-stage failure propagation is
+deferred.
 
 The BIOS DMA completion wait uses LiteX's hardware timer instead of a fixed CPU
 poll count. Its deadline covers two complete DMA hardware timeout intervals
@@ -163,6 +181,13 @@ counter and PRBS31 DMA tests passed with zero errors and no fault: writes were
 2.420201 and 2.420200 GB/s (45.37%). This uses the standard controller and a
 width-converted port, so the result is not comparable to the older paired-port
 engine without accounting for that architecture.
+
+That converted-port result is historical rather than current qualification. A
+later 2666.667 MT/s run reported 153 errors with the primary counter pattern,
+while its PRBS transfer and CPU guard checks passed. Those passing checks do not
+identify the cause of the counter failure or establish that the converted path
+is reliable. The converted 2666.667 MT/s configuration therefore remains
+unqualified pending hardware reproduction from the current sources.
 
 Final component-`USPDDRPHY` hardware testing covered three configurations. Each
 passed three initialization runs, three mandatory controller-path memory tests,

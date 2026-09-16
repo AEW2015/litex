@@ -18,7 +18,8 @@ static unsigned nd_dma_refine(unsigned *centers)
     for(unsigned pattern=0;pattern<2;++pattern) {
         if(!nd_program(centers,3,0)) return nb_fail(12);
         unsigned seed=nd_dma_check(pattern,0);
-        USNATIVE_DEBUG("DMA deskew seed pattern=%u errors=%u mask=%04x\n",pattern,seed,dma_bench_dq_error_mask_read());
+        USNATIVE_DEBUG("DMA deskew seed pattern=%u errors=%u mask=%04x\n",
+            pattern, seed, (unsigned)dma_bench_dq_error_mask_read());
         if(seed==0xffffffffu) return nb_fail(16);
         for(unsigned sample=0;sample<29;++sample) {
             unsigned tap=12+2*sample;
@@ -46,16 +47,21 @@ static unsigned nd_dma_refine(unsigned *centers)
     /* Refine a guard edge without reducing its required margin. Every
      * adjustment stays inside the measured counter/PRBS window, and all
      * six fresh guard transfers restart after any adjustment. */
-    unsigned guard_errors[6],guard_masks[6],accepted=0,accepted_attempt=0;
+    unsigned accepted=0;
+#ifdef CONFIG_SDRAM_USNATIVE_DEBUG
+    unsigned guard_errors[6],guard_masks[6],accepted_attempt=0;
+#endif
     for(unsigned attempt=0;attempt<8 && !accepted;++attempt) {
         unsigned retry=0;
         for(int offset=-4;offset<=4 && !retry;offset+=4) {
             if(!nd_program(centers,3,offset)) return nb_fail(12);
             for(unsigned random=0;random<2;++random) {
-                unsigned slot=(unsigned)(offset+4)/4*2+random;
                 unsigned errors=nd_dma_check(random,0);
                 unsigned mask=dma_bench_dq_error_mask_read();
+#ifdef CONFIG_SDRAM_USNATIVE_DEBUG
+                unsigned slot=(unsigned)(offset+4)/4*2+random;
                 guard_errors[slot]=errors;guard_masks[slot]=mask;
+#endif
                 USNATIVE_DEBUG("DMA_GUARD_SEARCH attempt=%u offset=%d pattern=%u errors=%u mask=%04x\n",attempt,offset,random,errors,mask);
                 if(errors==0xffffffffu || (!!errors != !!mask)) return nb_fail(16);
                 if(errors) {
@@ -73,9 +79,15 @@ static unsigned nd_dma_refine(unsigned *centers)
                 }
             }
         }
-        if(!retry) {accepted=1;accepted_attempt=attempt;}
+        if(!retry) {
+            accepted=1;
+#ifdef CONFIG_SDRAM_USNATIVE_DEBUG
+            accepted_attempt=attempt;
+#endif
+        }
     }
     if(!accepted) return nb_fail(18);
+#ifdef CONFIG_SDRAM_USNATIVE_DEBUG
     USNATIVE_DEBUG("DMA_GUARD_ACCEPT attempt=%u\n",accepted_attempt);
     for(unsigned bit=0;bit<16;++bit)
         USNATIVE_DEBUG("DMA_DESKEW_BIT %u WINDOW %u %u CENTER %u\n",bit,window_first[bit],window_last[bit],centers[bit]);
@@ -83,6 +95,7 @@ static unsigned nd_dma_refine(unsigned *centers)
         unsigned slot=(unsigned)(offset+4)/4*2+random;
         USNATIVE_DEBUG("DMA_DESKEW_GUARD offset=%d pattern=%u errors=%u mask=%04x\n",offset,random,guard_errors[slot],guard_masks[slot]);
     }
+#endif
     if(!nd_program(centers,3,0)) return nb_fail(12);
     for(unsigned random=0;random<2;++random) {
         unsigned errors=nd_dma_check(random,0);

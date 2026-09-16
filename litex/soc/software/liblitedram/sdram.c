@@ -1658,6 +1658,7 @@ static void sdram_write_dq_dqs_training(void) {
 int sdram_leveling(void) {
 	int module;
 	int dq_line;
+	int success = 1;
 	sdram_software_control_on();
 
 	/* Start from a known PHY state. Individual calibration stages can then move
@@ -1683,7 +1684,11 @@ int sdram_leveling(void) {
 
 #ifdef SDRAM_PHY_WRITE_LEVELING_CAPABLE
 	printf("Write leveling:\n");
-	sdram_write_leveling();
+	if (!sdram_write_leveling()) {
+		printf("Write leveling failed.\n");
+		success = 0;
+		goto done;
+	}
 #endif // SDRAM_PHY_WRITE_LEVELING_CAPABLE
 
 #ifdef SDRAM_PHY_WRITE_LATENCY_CALIBRATION_CAPABLE
@@ -1701,9 +1706,10 @@ int sdram_leveling(void) {
 	sdram_read_leveling();
 #endif // SDRAM_PHY_READ_LEVELING_CAPABLE
 
+done:
 	sdram_software_control_off();
 
-	return 1;
+	return success;
 }
 
 /*-----------------------------------------------------------------------*/
@@ -1789,8 +1795,20 @@ int sdram_init(void) {
 	/* UltraScale global PHY reset clears DQ ODELAY but leaves the DQS ODELAY
 	 * increment count unchanged. Wrap DQS to its base delay first so the DQ
 	 * reset and software-tracked DQS offset start leveling coherently. */
-	for (i=0; i<SDRAM_PHY_MODULES; i++)
-		sdram_leveling_action(i, 0, write_rst_dqs_delay);
+	for (i=0; i<SDRAM_PHY_MODULES; i++) {
+		sdram_select(i, 0);
+		int dqs_reset_ok = write_rst_dqs_delay_checked(i);
+		sdram_deselect(i, 0);
+		if (!dqs_reset_ok) {
+			printf("DQS delay restoration failed on module %d\n", i);
+			sdram_software_control_off();
+#ifdef CSR_DDRCTRL_BASE
+			ddrctrl_init_error_write(1);
+			ddrctrl_init_done_write(1);
+#endif
+			return 0;
+		}
+	}
 #endif
 #if CSR_DDRPHY_RST_ADDR
 	ddrphy_rst_write(1);
@@ -1803,7 +1821,14 @@ int sdram_init(void) {
 	 * the DRAM can respond to software DFII read/write probes. */
 	init_sequence();
 #if defined(SDRAM_PHY_WRITE_LEVELING_CAPABLE) || defined(SDRAM_PHY_READ_LEVELING_CAPABLE)
-	sdram_leveling();
+	if (!sdram_leveling()) {
+		printf("SDRAM leveling failed.\n");
+#ifdef CSR_DDRCTRL_BASE
+		ddrctrl_init_error_write(1);
+		ddrctrl_init_done_write(1);
+#endif
+		return 0;
+	}
 #endif // defined(SDRAM_PHY_WRITE_LEVELING_CAPABLE) || defined(SDRAM_PHY_READ_LEVELING_CAPABLE)
 #endif // CONFIG_SDRAM_CUSTOM_INIT
 

@@ -124,7 +124,7 @@ void cdelay(int cycles);
     source.write_text(r"""
 #include <assert.h>
 #include <liblitedram/accessors.h>
-static unsigned selected, count[2], increments[2];
+static unsigned selected, count[2], increments[2], stuck;
 void cdelay(int cycles) {(void)cycles;}
 void ddrphy_dly_sel_write(unsigned value) {selected=value;}
 void ddrphy_wdly_dq_inc_write(unsigned value) {(void)value;}
@@ -137,7 +137,8 @@ unsigned ddrphy_wdly_dqs_inc_count_read(void) {
 void ddrphy_wdly_dqs_inc_write(unsigned value) {
  (void)value;
  for (unsigned i=0;i<2;i++) if (selected & (1u<<i)) {
-  count[i]=(count[i]+1)&511; increments[i]++;
+  if (!stuck) count[i]=(count[i]+1)&511;
+  increments[i]++;
  }
 }
 int main(void) {
@@ -147,6 +148,11 @@ int main(void) {
  sdram_leveling_action(1, 0, write_rst_dqs_delay);
  assert(count[1]==0 && increments[1]==512-37);
  assert(count[0]==0 && increments[0]==0);
+ count[0]=37; stuck=1;
+ sdram_select(0, 0);
+ assert(!write_rst_dqs_delay_checked(0));
+ sdram_deselect(0, 0);
+ assert(count[0]==37 && increments[0]==512);
  return 0;
 }
 """)
