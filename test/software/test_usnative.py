@@ -13,6 +13,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 INCLUDE = ROOT / "litex/soc/software/liblitedram/usnative"
+BIOS_INCLUDE = ROOT / "litex/soc/software/bios"
 CC = shutil.which(os.environ.get("CC", "gcc"))
 
 @unittest.skipUnless(CC, "Host C compiler required")
@@ -24,7 +25,7 @@ class TestUSNativeFirmware(unittest.TestCase):
             binary = directory / ("test.exe" if os.name == "nt" else "test")
             source.write_text(code)
             result = subprocess.run([CC, "-std=c99", "-Werror=implicit-function-declaration",
-                "-I", str(INCLUDE), str(source), "-o", str(binary)],
+                "-I", str(INCLUDE), "-I", str(BIOS_INCLUDE), str(source), "-o", str(binary)],
                 capture_output=True, text=True, timeout=60)
             if not success:
                 self.assertNotEqual(result.returncode, 0)
@@ -90,6 +91,25 @@ int main(void) {{
 
     def test_dma_opt_in_requires_engine(self):
         self.compile_run(self.profile(extra="#define CONFIG_SDRAM_USNATIVE_DMA_CALIBRATION"), False)
+
+    def test_dma_benchmark_reports_selected_hardware_mode(self):
+        self.compile_run(r'''
+#include <string.h>
+#include "native_dma_mode.h"
+int main(void) {
+ return NATIVE_DMA_BANK_GROUP_INTERLEAVED != 0 ||
+     strcmp(NATIVE_DMA_MODE_NAME, "standard-native-port");
+}
+''')
+        self.compile_run(r'''
+#include <string.h>
+#define CONFIG_SDRAM_NATIVE_DMA_BANK_GROUP_INTERLEAVING
+#include "native_dma_mode.h"
+int main(void) {
+ return NATIVE_DMA_BANK_GROUP_INTERLEAVED != 1 ||
+     strcmp(NATIVE_DMA_MODE_NAME, "paired-bank-group-interleaved");
+}
+''')
 
     def test_reject_insufficient_scratch_ram(self):
         self.compile_run(self.profile(extra="#undef MAIN_RAM_SIZE\n#define MAIN_RAM_SIZE 0x01000000"), False)
