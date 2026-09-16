@@ -257,3 +257,18 @@ DMA-assisted native calibration briefly grants access inside the refinement
 step and revokes it on return, including failure. PHY readiness, training state,
 DFI ownership and sticky hardware faults remain additional hardware gates.
 Fatal DMA faults still require FPGA reconfiguration.
+
+
+### Bounded 3200 TX-window recovery
+
+At 3200 only, an undersized direct TX window can trigger two nearby RX trials
+(+4, then -4 taps). Each RX candidate stays at least four taps inside the
+previously measured RX window. A candidate is accepted only when two complete
+TX scans have an intersection of at least 32 taps and its center confirms.
+Delay-programming and center-confirmation failures do not trigger this fallback.
+The final direct-burst check, per-bit RX deskew, guards and controller memory
+test remain mandatory. Exhaustion fails calibration and leaves DDR/DMA closed.
+Other profiles keep the original search behavior. Retry attempts and accepted
+windows are reported even with debug disabled; detailed lane summaries are
+available with debug enabled. This does not qualify the overclock's static
+primitive timing or replace power-cycle/temperature testing.

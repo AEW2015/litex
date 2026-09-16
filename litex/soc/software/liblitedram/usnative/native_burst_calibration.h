@@ -12,7 +12,7 @@
 #include <generated/sdram_phy.h>
 #include "native_status_io.h"
 
-struct nb_window { unsigned first, last, center; };
+struct nb_window { unsigned first, last, center, short_window; };
 struct nb_result { struct nb_window ck, rx[2], dq[2]; };
 
 static unsigned nb_fail(unsigned error)
@@ -124,6 +124,7 @@ static int nb_center(unsigned lane, int transmit, struct nb_window *window)
     unsigned start=transmit ? 32 : 0, end=transmit ? 176 : 128;
     unsigned run=0, best=0, best_end=0;
     const char *direction=transmit ? "TX" : "RX";
+    window->short_window=0;
     for (unsigned tap=start; tap<=end; tap+=4) {
         if (!nb_delay(lane,tap,transmit)) {
             printf("Native %s delay failed: lane=%u tap=%u\n",direction,lane,tap);
@@ -133,6 +134,7 @@ static int nb_center(unsigned lane, int transmit, struct nb_window *window)
         if (run>best) { best=run; best_end=tap; }
     }
     if (best<9) { /* Require at least 32 taps of measured width. */
+        window->short_window=1;
         printf("Native %s window too short: lane=%u samples=%u required=9 step=4 first=%u last=%u\n",
             direction,lane,best,best ? best_end-4*(best-1) : 0,best_end);
         return 0;
@@ -152,6 +154,46 @@ static int nb_center(unsigned lane, int transmit, struct nb_window *window)
         return 0;
     }
     return 1;
+}
+
+/* At 3200, a read sampling point can limit the observed write window.
+ * Retry only an undersized window, at two nearby RX points inside its measured
+ * bounds. Accept an intersection of two complete TX scans, never a relaxed
+ * width or a failed delay/center confirmation. Other profiles are unchanged. */
+static int nb_center_tx(unsigned lane, struct nb_window *rx, struct nb_window *tx)
+{
+    if (nb_center(lane,1,tx)) return 1;
+#if CONFIG_CLOCK_FREQUENCY == 400000000
+    if (!tx->short_window) return 0;
+    const int offsets[2]={4,-4};
+    for (unsigned attempt=0; attempt<2; ++attempt) {
+        int candidate=(int)rx->center+offsets[attempt];
+        if (candidate<(int)rx->first+4 || candidate>(int)rx->last-4) continue;
+        printf("Native TX window retry: lane=%u attempt=%u RX=%d\n",lane,attempt+1,candidate);
+        if (!nb_delay(lane,USNATIVE_BOOT_TX_DELAY,1) ||
+            !nb_delay(lane,(unsigned)candidate,0)) return 0;
+        if (nb_check(256,1<<lane)) continue;
+        if (!nb_center(lane,1,tx)) {
+            if (!tx->short_window) return 0;
+            continue;
+        }
+        struct nb_window confirm;
+        if (!nb_center(lane,1,&confirm)) {
+            if (!confirm.short_window) return 0;
+            continue;
+        }
+        unsigned first=tx->first>confirm.first ? tx->first : confirm.first;
+        unsigned last=tx->last<confirm.last ? tx->last : confirm.last;
+        if (last<first || last-first<32) continue;
+        tx->first=first; tx->last=last; tx->center=first+4*((last-first)/8);
+        if (!nb_delay(lane,tx->center,1) || nb_check(256,1<<lane)) return 0;
+        rx->center=(unsigned)candidate;
+        printf("Native TX retry accepted: lane=%u RX=%u TX=[%u..%u] center=%u\n",
+            lane,rx->center,tx->first,tx->last,tx->center);
+        return 1;
+    }
+#endif
+    return 0;
 }
 
 /* Return zero only after margin searches and a VTC-enabled burst check.
@@ -192,7 +234,7 @@ static unsigned nb_calibrate(struct nb_result *result)
     for (unsigned lane=0; lane<2; ++lane)
         if (!nb_center(lane,0,&result->rx[lane])) return nb_fail(7);
     for (unsigned lane=0; lane<2; ++lane)
-        if (!nb_center(lane,1,&result->dq[lane])) return nb_fail(8);
+        if (!nb_center_tx(lane,&result->rx[lane],&result->dq[lane])) return nb_fail(8);
     if (nb_check(4096,3)) return nb_fail(9);
     ddrphy_gate_override_write(0); ddrphy_en_vtc_write(1);
     unsigned i;

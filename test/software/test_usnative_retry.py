@@ -35,7 +35,7 @@ static int capture(const char *format, ...) {
 #define printf capture
 #define USNATIVE_DEBUG(...) do {} while(0)
 #define USNATIVE_SNAPSHOT() do {} while(0)
-struct nb_window {unsigned first,last,center;};
+struct nb_window {unsigned first,last,center,short_window;};
 struct nb_result {struct nb_window ck,rx[2],dq[2];};
 static unsigned scenario,boots,checks,stage;
 static int nb_boot(unsigned tap) {
@@ -49,6 +49,7 @@ static unsigned nb_check(unsigned count,unsigned lanes) {
 }
 static unsigned nb_fail(unsigned code) {return code;}
 static int nb_center(unsigned lane,int tx,struct nb_window *w) {(void)lane;(void)tx;(void)w;return 1;}
+static int nb_center_tx(unsigned lane,struct nb_window *rx,struct nb_window *tx) {(void)rx;return nb_center(lane,1,tx);}
 static void ddrphy_training_error_write(unsigned v) {(void)v;}
 static void ddrphy_training_stage_write(unsigned v) {stage=v;}
 static void ddrphy_gate_override_write(unsigned v) {(void)v;}
@@ -91,7 +92,7 @@ int main(void) {
 #define USNATIVE_DEBUG(...) do {} while(0)
 #define USNATIVE_SNAPSHOT() do {} while(0)
 #define false 0
-struct nb_window {unsigned first,last,center;};
+struct nb_window {unsigned first,last,center,short_window;};
 struct nb_result {struct nb_window ck,rx[2],dq[2];};
 static unsigned admission=1,stage,error,bisc_only,reset,owner;
 static unsigned fail_cal=1,fail_memory,calibrations,memtests,bisc_calls,bisc_ok=1;
@@ -176,7 +177,7 @@ static int capture(const char *format, ...) {
 }
 #define printf capture
 #define USNATIVE_DEBUG(...) do {} while(0)
-struct nb_window {unsigned first,last,center;};
+struct nb_window {unsigned first,last,center,short_window;};
 static unsigned scenario,tap,programs;
 static int nb_delay(unsigned lane,unsigned value,int tx) {
  assert(lane==1 && tx);tap=value;++programs;
@@ -203,3 +204,48 @@ int main(void) {
  return 0;
 }
 ''')
+
+
+    def test_3200_tx_retry_requires_two_wide_windows(self):
+        body = function(firmware.INCLUDE / "native_burst_calibration.h", "static int nb_center_tx(")
+        source = r'''
+#include <assert.h>
+#include <stdio.h>
+#define USNATIVE_BOOT_TX_DELAY 72
+struct nb_window {unsigned first,last,center,short_window;};
+static unsigned scenario,scans,programs,rx_value;
+static int nb_center(unsigned lane,int tx,struct nb_window *w) {
+ assert(lane==0 && tx);++scans;
+ w->short_window=0;
+ if(scans==1) {w->short_window=scenario!=1;return 0;}
+ if(scenario==2) {w->short_window=1;return 0;}
+ w->first=scans%2?60:56;w->last=92;w->center=76;
+ if(scenario==3 && scans%2)w->first=64; /* intersection is only 28 taps */
+ return 1;
+}
+static int nb_delay(unsigned lane,unsigned tap,int tx) {
+ assert(lane==0);++programs;if(!tx)rx_value=tap;return scenario!=4;
+}
+static unsigned nb_check(unsigned count,unsigned lanes) {assert(count==256 && lanes==1);return 0;}
+'''
+        main = r'''
+int main(void) {
+ struct nb_window rx={24,72,48,0},tx;
+#ifdef EXPECT_RETRY
+ assert(nb_center_tx(0,&rx,&tx));assert(scans==3 && rx.center==52 && rx_value==52);
+ assert(tx.first==60 && tx.last==92 && tx.center==76);
+ for(scenario=1;scenario<=4;++scenario) {
+  scans=programs=0;rx.center=48;
+  assert(!nb_center_tx(0,&rx,&tx));assert(rx.center==48);
+  assert(scans<=5);if(scenario==1)assert(programs==0);
+ }
+ scenario=0;scans=programs=0;rx.first=44;rx.last=52;
+ assert(!nb_center_tx(0,&rx,&tx));assert(scans==1 && programs==0);
+#else
+ assert(!nb_center_tx(0,&rx,&tx));assert(scans==1 && programs==0);
+#endif
+ return 0;
+}
+'''
+        self.compile_run("#define CONFIG_CLOCK_FREQUENCY 400000000\n#define EXPECT_RETRY\n" + source + body + main)
+        self.compile_run("#define CONFIG_CLOCK_FREQUENCY 333333333\n" + source + body + main)
