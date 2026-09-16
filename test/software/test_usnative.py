@@ -101,6 +101,51 @@ int main(void) {
      strcmp(NATIVE_DMA_MODE_NAME, "standard-native-port");
 }
 ''')
+
+    def test_dma_completion_deadline_tracks_hardware_cycles(self):
+        for frequency, expected_us in ((125_000_000, 17_000_000),
+                                       (250_000_000, 9_000_000),
+                                       (400_000_000, 6_000_000)):
+            self.compile_run(f'''
+#define CONFIG_CLOCK_FREQUENCY {frequency}u
+#include "native_dma_timeout.h"
+int main(void) {{ return native_dma_completion_timeout_us() != {expected_us}u; }}
+''')
+
+    def test_dma_admission_for_native_and_component_phys(self):
+        self.compile_run(r'''
+#include <assert.h>
+#define CONFIG_SDRAM_USNATIVE_XEM8320
+static unsigned ready, stage, error, bist_only;
+static unsigned ddrphy_ready_read(void) { return ready; }
+static unsigned ddrphy_training_stage_read(void) { return stage; }
+static unsigned ddrphy_training_error_read(void) { return error; }
+static unsigned ddrphy_bisc_only_read(void) { return bist_only; }
+#include "native_dma_admission.h"
+int main(void) {
+ assert(!native_dma_admission_ready());
+ ready=1; stage=5; assert(native_dma_admission_ready());
+ error=1; assert(!native_dma_admission_ready());
+ error=0; bist_only=1; assert(!native_dma_admission_ready());
+ return 0;
+}
+''')
+        self.compile_run(r'''
+#include <assert.h>
+#define CONFIG_SDRAM_DMA_SOFTWARE_ADMISSION
+static unsigned admitted;
+static unsigned dma_bench_software_ready_read(void) { return admitted; }
+#include "native_dma_admission.h"
+int main(void) {
+ assert(!native_dma_admission_ready());
+ admitted=1; assert(native_dma_admission_ready());
+ return 0;
+}
+''')
+        self.compile_run(r'''
+#include "native_dma_admission.h"
+int main(void) { return native_dma_admission_ready(); }
+''', False)
         self.compile_run(r'''
 #include <string.h>
 #define CONFIG_SDRAM_NATIVE_DMA_BANK_GROUP_INTERLEAVING
@@ -203,6 +248,85 @@ int main(void) {
  assert(!sdram_init() && failed==20 && handoffs==1 && tests==1 && !speeds && done && status_error);
  failed=0;memory_ok=1;
  assert(sdram_init() && !failed && handoffs==2 && tests==2 && speeds==1 && done && !status_error);
+ return 0;
+}
+""")
+
+    def test_component_phy_dma_admission_tracks_full_initialization(self):
+        source = (ROOT / "litex/soc/software/liblitedram/sdram.c").read_text()
+        start = source.index("int sdram_init(void) {")
+        function = source[start:source.index("\n}\n", start) + 3]
+        self.compile_run(r"""
+#include <assert.h>
+#include <stdio.h>
+#include <string.h>
+#define CONFIG_SDRAM_DMA_SOFTWARE_ADMISSION
+#define SDRAM_PHY_USPDDRPHY
+#define CSR_DDRCTRL_BASE 1
+#define CSR_DDRPHY_RST_ADDR 1
+#define CSR_DDRPHY_WDLY_DQS_INC_COUNT_ADDR 1
+#define SDRAM_PHY_WRITE_LEVELING_CAPABLE
+#define SDRAM_PHY_MODULES 2
+#define write_rst_dqs_delay 7
+#define MAIN_RAM_BASE 0x40000000ul
+#define MAIN_RAM_BASE_VA MAIN_RAM_BASE
+#define MEMTEST_DATA_SIZE 64
+#define false 0
+static unsigned memory_ok=1, admission=9, admission_writes, tests, initialized, events;
+static char order[16];
+static void dma_bench_software_ready_write(unsigned value) {admission=value;++admission_writes;}
+static void ddrctrl_init_done_write(unsigned value) {(void)value;}
+static void ddrctrl_init_error_write(unsigned value) {(void)value;}
+static void sdram_write_leveling_rst_cmd_delay(unsigned value) {(void)value;}
+static void sdram_write_leveling_rst_dat_delay(unsigned module, unsigned show) {(void)module;(void)show;}
+static void sdram_software_control_on(void) {order[events++]='O';}
+static void sdram_software_control_off(void) {}
+static int sdram_leveling(void) {return 1;}
+static void sdram_leveling_action(int module, int dq, int action) {
+ assert(module>=0 && module<2 && dq==0 && action==write_rst_dqs_delay);
+ order[events++]=module?'1':'0';
+}
+static void ddrphy_rst_write(unsigned value) {order[events++]=value?'R':'r';}
+static void cdelay(unsigned value) {(void)value;order[events++]='D';}
+static void init_sequence(void) {++initialized;order[events++]='J';}
+static int memtest(unsigned *p, unsigned size) {(void)p;(void)size;++tests;return memory_ok;}
+static void memspeed(unsigned *p,unsigned size,int write,int random) {(void)p;(void)size;(void)write;(void)random;}
+""" + function + r"""
+int main(void) {
+ assert(sdram_init() && admission==1 && admission_writes==2 && tests==1 && initialized==1);
+ assert(events>=8 && !memcmp(order, "O01RDrDJ", 8));
+ memory_ok=0;
+ assert(!sdram_init() && admission==0 && admission_writes==3 && tests==2 && initialized==2);
+ return 0;
+}
+""")
+
+    def test_component_phy_debug_maps_only_standard_training_details(self):
+        source = (ROOT / "litex/soc/software/liblitedram/sdram.c").read_text()
+        self.assertIn("#ifdef CONFIG_SDRAM_PHY_DEBUG", source)
+        block = source.split("#ifdef CONFIG_SDRAM_PHY_DEBUG", 1)[1].split("#endif", 1)[0]
+        self.assertIn("#define SDRAM_WRITE_LEVELING_CMD_DELAY_DEBUG", block)
+        self.assertIn("#define SDRAM_WRITE_LATENCY_CALIBRATION_DEBUG", block)
+        self.assertNotIn("USNATIVE", block)
+
+    def test_component_phy_memory_test_cannot_grant_dma(self):
+        source = (ROOT / "litex/soc/software/bios/cmds/cmd_litedram.c").read_text()
+        start = source.index("static void sdram_test_handler(")
+        function = source[start:source.index("\n}\n", start) + 3]
+        self.compile_run(r"""
+#include <assert.h>
+#define CONFIG_SDRAM_DMA_SOFTWARE_ADMISSION
+#define MAIN_RAM_BASE_VA 0x40000000ul
+#define MAIN_RAM_SIZE 0x08000000ul
+static unsigned ready, memory_ok=1;
+static unsigned dma_bench_software_ready_read(void) {return ready;}
+static void dma_bench_software_ready_write(unsigned value) {ready=value;}
+static int memtest(unsigned *p, unsigned long size) {(void)p;(void)size;return memory_ok;}
+""" + function + r"""
+int main(void) {
+ sdram_test_handler(0, 0); assert(!ready);
+ ready=1; sdram_test_handler(0, 0); assert(ready);
+ memory_ok=0; sdram_test_handler(0, 0); assert(!ready);
  return 0;
 }
 """)

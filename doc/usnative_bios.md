@@ -113,6 +113,31 @@ mode remains the default, and neither mode enables automatic startup DMA
 calibration unless the separate `CONFIG_SDRAM_USNATIVE_DMA_CALIBRATION` option
 is selected.
 
+The optional command also supports component `USPDDRPHY` builds. These select
+`CONFIG_SDRAM_DMA_SOFTWARE_ADMISSION` and provide the
+`dma_bench_software_ready` CSR. `sdram_init()` clears admission before each
+initialization and grants it only after standard leveling and the final
+controller-path memory test complete. A failed or interrupted reinitialization
+therefore leaves the hardware gate closed. The `sdram_cal` diagnostic revokes
+admission because leveling alone does not validate normal controller traffic;
+run `sdram_init` before using DMA again. Component-PHY debug uses LiteDRAM's
+existing leveling output and commands, not HSSIO bit-slice window reporting.
+Targets may map a component-PHY debug option to `CONFIG_SDRAM_PHY_DEBUG` to
+include command-delay scans and write-latency calibration samples. It remains
+separate from USNative debugging and does not enable DMA.
+
+For `USDDRPHY` and `USPDDRPHY`, repeated initialization wraps each DQS output
+delay back to its base before asserting the global PHY reset. The global reset
+clears DQ output delay, so this preparation keeps the DQ and software-tracked
+DQS offsets coherent when leveling starts again. It does not affect the
+USNative initialization path.
+
+The BIOS DMA completion wait uses LiteX's hardware timer instead of a fixed CPU
+poll count. Its deadline covers two complete DMA hardware timeout intervals
+plus a settling margin, with the conversion performed from system-clock cycles
+using 64-bit arithmetic. This permits large transfers to finish without making
+the safety timeout depend on CPU execution speed.
+
 The 2933.333 and 3200 profiles require `CONFIG_SDRAM_USNATIVE_OVERCLOCK` in
 addition to the native profile. Their CL/CWL and read-gate delays differ from
 the initial 2400/2666.667 profiles. The BIOS identifies overclock operation at
@@ -138,6 +163,29 @@ counter and PRBS31 DMA tests passed with zero errors and no fault: writes were
 2.420201 and 2.420200 GB/s (45.37%). This uses the standard controller and a
 width-converted port, so the result is not comparable to the older paired-port
 engine without accounting for that architecture.
+
+Final component-`USPDDRPHY` hardware testing covered three configurations. Each
+passed three initialization runs, three mandatory controller-path memory tests,
+and five DMA tests including a full 1 GiB PRBS write and reread.
+
+| DDR rate | DMA interface | DMA write/read | Physical-peak efficiency |
+|---:|---|---:|---:|
+| 1000 MT/s | 128-bit standard | 0.905 / 0.918 GB/s | 45.24% / 45.90% |
+| 1000 MT/s | 256-bit paired bank groups | 1.797 / 1.815 GB/s | 89.85% / 90.77% |
+| 2000 MT/s | 256-bit paired bank groups | 3.569 / 3.584 GB/s | 89.23% / 89.60% |
+
+Both paired configurations passed CPU/DMA interoperability tests. The 1000
+MT/s paired build also verified the admission contract: calibration-only and a
+subsequent standalone memory test left DMA closed, while full initialization
+restored access. The hardware-timer completion deadline passed the 1 GiB tests.
+These builds retain the upstream component-PHY RTL and use the BIOS pre-reset
+DQS restoration described above.
+
+The 1000 MT/s implementations passed setup, hold, and pulse-width timing. The
+2000 MT/s implementation had positive fabric setup and hold slack but a
+`-0.600 ns` clock pulse-width slack, so it remains an experimental hardware
+result rather than a timing-qualified component-PHY configuration. Its reported
+read-leveling windows are standard PHY half-windows, not HSSIO bit-slice eyes.
 
 The packaged 2933.333 and 3200 MT/s configurations have not yet completed
 hardware qualification. Both are overclock profiles and must remain explicitly
