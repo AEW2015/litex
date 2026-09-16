@@ -157,7 +157,7 @@ static int nb_center(unsigned lane, int transmit, struct nb_window *window)
 }
 
 /* At 3200, a read sampling point can limit the observed write window.
- * Retry only an undersized window, at two nearby RX points inside its measured
+ * Retry only an undersized window, at four nearby RX points inside its measured
  * bounds. Accept an intersection of two complete TX scans, never a relaxed
  * width or a failed delay/center confirmation. Other profiles are unchanged. */
 static int nb_center_tx(unsigned lane, struct nb_window *rx, struct nb_window *tx)
@@ -165,8 +165,8 @@ static int nb_center_tx(unsigned lane, struct nb_window *rx, struct nb_window *t
     if (nb_center(lane,1,tx)) return 1;
 #if CONFIG_CLOCK_FREQUENCY == 400000000
     if (!tx->short_window) return 0;
-    const int offsets[2]={4,-4};
-    for (unsigned attempt=0; attempt<2; ++attempt) {
+    const int offsets[4]={4,8,-4,-8};
+    for (unsigned attempt=0; attempt<4; ++attempt) {
         int candidate=(int)rx->center+offsets[attempt];
         if (candidate<(int)rx->first+4 || candidate>(int)rx->last-4) continue;
         printf("Native TX window retry: lane=%u attempt=%u RX=%d\n",lane,attempt+1,candidate);

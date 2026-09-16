@@ -261,8 +261,8 @@ Fatal DMA faults still require FPGA reconfiguration.
 
 ### Bounded 3200 TX-window recovery
 
-At 3200 only, an undersized direct TX window can trigger two nearby RX trials
-(+4, then -4 taps). Each RX candidate stays at least four taps inside the
+At 3200 only, an undersized direct TX window can trigger four nearby RX trials
+(+4, +8, -4, then -8 taps). Each RX candidate stays at least four taps inside the
 previously measured RX window. A candidate is accepted only when two complete
 TX scans have an intersection of at least 32 taps and its center confirms.
 Delay-programming and center-confirmation failures do not trigger this fallback.

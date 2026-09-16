@@ -218,7 +218,7 @@ static int nb_center(unsigned lane,int tx,struct nb_window *w) {
  assert(lane==0 && tx);++scans;
  w->short_window=0;
  if(scans==1) {w->short_window=scenario!=1;return 0;}
- if(scenario==2) {w->short_window=1;return 0;}
+ if(scenario==2 || (scenario==6 && scans==2)) {w->short_window=1;return 0;}
  w->first=scans%2?60:56;w->last=92;w->center=76;
  if(scenario==3 && scans%2)w->first=64; /* intersection is only 28 taps */
  return 1;
@@ -237,9 +237,11 @@ int main(void) {
  for(scenario=1;scenario<=4;++scenario) {
   scans=programs=0;rx.center=48;
   assert(!nb_center_tx(0,&rx,&tx));assert(rx.center==48);
-  assert(scans<=5);if(scenario==1)assert(programs==0);
+  assert(scans<=9);if(scenario==1)assert(programs==0);
  }
- scenario=0;scans=programs=0;rx.first=44;rx.last=52;
+ scenario=6;scans=programs=0;rx.center=44;
+ assert(nb_center_tx(0,&rx,&tx));assert(rx.center==52 && scans==4);
+ scenario=0;scans=programs=0;rx.center=48;rx.first=44;rx.last=52;
  assert(!nb_center_tx(0,&rx,&tx));assert(scans==1 && programs==0);
 #else
  assert(!nb_center_tx(0,&rx,&tx));assert(scans==1 && programs==0);
