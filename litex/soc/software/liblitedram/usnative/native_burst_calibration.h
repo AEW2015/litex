@@ -123,15 +123,35 @@ static int nb_center(unsigned lane, int transmit, struct nb_window *window)
 {
     unsigned start=transmit ? 32 : 0, end=transmit ? 176 : 128;
     unsigned run=0, best=0, best_end=0;
+    const char *direction=transmit ? "TX" : "RX";
     for (unsigned tap=start; tap<=end; tap+=4) {
-        if (!nb_delay(lane,tap,transmit)) return 0;
+        if (!nb_delay(lane,tap,transmit)) {
+            printf("Native %s delay failed: lane=%u tap=%u\n",direction,lane,tap);
+            return 0;
+        }
         if (nb_check(128,1<<lane)) run=0; else ++run;
         if (run>best) { best=run; best_end=tap; }
     }
-    if (best<9) return 0; /* Require at least32 taps of measured width. */
+    if (best<9) { /* Require at least 32 taps of measured width. */
+        printf("Native %s window too short: lane=%u samples=%u required=9 step=4 first=%u last=%u\n",
+            direction,lane,best,best ? best_end-4*(best-1) : 0,best_end);
+        return 0;
+    }
     window->first=best_end-4*(best-1); window->last=best_end;
     window->center=window->first+4*((best-1)/2);
-    return nb_delay(lane,window->center,transmit) && !nb_check(256,1<<lane);
+    if (!nb_delay(lane,window->center,transmit)) {
+        printf("Native %s center delay failed: lane=%u center=%u\n",direction,lane,window->center);
+        return 0;
+    }
+    unsigned errors=nb_check(256,1<<lane);
+    USNATIVE_DEBUG("NATIVE_WINDOW direction=%s lane=%u first=%u last=%u center=%u errors=%u\n",
+        direction,lane,window->first,window->last,window->center,errors);
+    if (errors) {
+        printf("Native %s center burst failed: lane=%u center=%u errors=%u\n",
+            direction,lane,window->center,errors);
+        return 0;
+    }
+    return 1;
 }
 
 /* Return zero only after margin searches and a VTC-enabled burst check.

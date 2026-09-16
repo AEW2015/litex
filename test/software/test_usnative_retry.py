@@ -159,3 +159,47 @@ int main(void) {
  return 0;
 }
 ''')
+
+
+    def test_lane_window_failures_keep_minimum_width(self):
+        body = function(firmware.INCLUDE / "native_burst_calibration.h", "static int nb_center(")
+        self.compile_run(r'''
+#include <assert.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <string.h>
+static char messages[4096];
+static int capture(const char *format, ...) {
+ va_list args;va_start(args,format);
+ int n=vsnprintf(messages+strlen(messages),sizeof(messages)-strlen(messages),format,args);
+ va_end(args);return n;
+}
+#define printf capture
+#define USNATIVE_DEBUG(...) do {} while(0)
+struct nb_window {unsigned first,last,center;};
+static unsigned scenario,tap,programs;
+static int nb_delay(unsigned lane,unsigned value,int tx) {
+ assert(lane==1 && tx);tap=value;++programs;
+ return !((scenario==1 && value==40) || (scenario==3 && programs==38));
+}
+static unsigned nb_check(unsigned count,unsigned lanes) {
+ assert(lanes==2);
+ if(count==256)return scenario==4?2:0;
+ return tap<56 || tap>(scenario==2?84:88);
+}
+''' + body + r'''
+int main(void) {
+ const char *reasons[]={"","TX delay failed: lane=1 tap=40",
+  "TX window too short: lane=1 samples=8 required=9",
+  "TX center delay failed: lane=1 center=72",
+  "TX center burst failed: lane=1 center=72 errors=2"};
+ struct nb_window w;
+ for(scenario=1;scenario<=4;++scenario) {
+  programs=0;messages[0]=0;
+  assert(!nb_center(1,1,&w));assert(strstr(messages,reasons[scenario]));
+ }
+ scenario=0;programs=0;assert(nb_center(1,1,&w));
+ assert(w.first==56 && w.last==88 && w.center==72);
+ return 0;
+}
+''')
