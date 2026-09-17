@@ -272,3 +272,38 @@ Other profiles keep the original search behavior. Retry attempts and accepted
 windows are reported even with debug disabled; detailed lane summaries are
 available with debug enabled. This does not qualify the overclock's static
 primitive timing or replace power-cycle/temperature testing.
+
+
+### Optional DMA guard recovery
+
+The initial DMA eye sweep changes all RX DQs together and reads a previously
+written pattern. A disagreement with the later fresh write/read guards can
+therefore justify a new measurement; it is not proof that the global sweep
+caused a hardware failure.
+
+On guard-window exhaustion or a center failure, refinement remeasures the affected
+DQs (including earlier failing guards) one at a time, holding every other DQ at its selected center. Each DQ is
+scanned from tap 12 through 68 and back at two-tap spacing, using fresh 64 MiB
+counter and PRBS write/read transfers at every point. The accepted window is the
+longest contiguous intersection of all four observations, with at least five
+samples. All six center/?4-tap guards restart after changing a center. No guard
+margin is relaxed, no unmeasured taps are accepted, and there is only one such
+recovery budget per initialization. A subsequent guard failure retains the
+existing bounded two-tap adjustment within the new measured bounds or fails.
+
+For example, a measured 22..34 window permits guarded centers only at 26, 28 or
+30. Persistent failure there must fail initialization; moving to 32 is invalid.
+DMA engine/poll timeout, inconsistent error count/mask, or delay-programming
+failure immediately aborts. Normal final memory testing and software admission
+remain mandatory.
+
+The fallback adds exactly 116 DMA transactions per reported failing DQ, at most
+1,856 for all sixteen DQs. Including the original sweep, sixteen guard attempts
+and final confirmation, an upper bound is 2,014 transactions: 125.875 GiB read
+and 122.25 GiB written. This is an opt-in destructive startup diagnostic with a
+potentially substantial startup cost, not normal initialization. The host C
+regressions exercise repeat-scan intersections, nonoverlap, the original narrow
+window, other-DQ center preservation, engine/delay failures, restarted guards,
+and exhaustion without a second recovery. Hardware qualification is tracked in
+the board validation report; these host tests alone do not resolve the recorded
+hardware failures.
