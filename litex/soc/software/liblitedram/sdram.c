@@ -1658,7 +1658,6 @@ static void sdram_write_dq_dqs_training(void) {
 int sdram_leveling(void) {
 	int module;
 	int dq_line;
-	int success = 1;
 	sdram_software_control_on();
 
 	/* Start from a known PHY state. Individual calibration stages can then move
@@ -1684,11 +1683,18 @@ int sdram_leveling(void) {
 
 #ifdef SDRAM_PHY_WRITE_LEVELING_CAPABLE
 	printf("Write leveling:\n");
+#if defined(SDRAM_PHY_USDDRPHY) || defined(SDRAM_PHY_USPDDRPHY)
+	/* UltraScale PHYs report a real write-leveling failure. Preserve the
+	 * existing behavior for other PHYs: LPDDR5SimPHY, for example, advertises
+	 * dummy delay CSRs rather than a usable write-leveling search. */
 	if (!sdram_write_leveling()) {
 		printf("Write leveling failed.\n");
-		success = 0;
-		goto done;
+		sdram_software_control_off();
+		return 0;
 	}
+#else
+	sdram_write_leveling();
+#endif
 #endif // SDRAM_PHY_WRITE_LEVELING_CAPABLE
 
 #ifdef SDRAM_PHY_WRITE_LATENCY_CALIBRATION_CAPABLE
@@ -1706,10 +1712,9 @@ int sdram_leveling(void) {
 	sdram_read_leveling();
 #endif // SDRAM_PHY_READ_LEVELING_CAPABLE
 
-done:
 	sdram_software_control_off();
 
-	return success;
+	return 1;
 }
 
 /*-----------------------------------------------------------------------*/
