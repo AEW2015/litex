@@ -18,6 +18,7 @@ int sdram_get_cwl(void);
 /*-----------------------------------------------------------------------*/
 /* Software/Hardware Control                                             */
 /*-----------------------------------------------------------------------*/
+void sdram_invalidate_dma(void);
 void sdram_software_control_on(void);
 void sdram_software_control_off(void);
 

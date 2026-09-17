@@ -111,6 +111,7 @@ static void sdram_force_rdphase_handler(int nb_params, char **params)
 		return;
 	}
 	printf("Forcing read phase to %d\n", phase);
+	sdram_invalidate_dma();
 	ddrphy_rdphase_write(phase);
 }
 define_command(sdram_force_rdphase, sdram_force_rdphase_handler, "Force read phase", LITEDRAM_CMDS);
@@ -137,6 +138,7 @@ static void sdram_force_wrphase_handler(int nb_params, char **params)
 		return;
 	}
 	printf("Forcing write phase to %d\n", phase);
+	sdram_invalidate_dma();
 	ddrphy_wrphase_write(phase);
 }
 define_command(sdram_force_wrphase, sdram_force_wrphase_handler, "Force write phase", LITEDRAM_CMDS);

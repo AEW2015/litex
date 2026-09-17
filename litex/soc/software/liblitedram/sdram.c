@@ -328,8 +328,17 @@ static void command_pwr(unsigned int value) {
 #define DFII_CONTROL_SOFTWARE (DFII_CONTROL_CKE|DFII_CONTROL_ODT|DFII_CONTROL_RESET_N)
 #define DFII_CONTROL_HARDWARE (DFII_CONTROL_SEL)
 
+void sdram_invalidate_dma(void) {
+#ifdef CONFIG_SDRAM_DMA_SOFTWARE_ADMISSION
+	/* PHY/MR mutation invalidates the last complete calibration and memtest.
+	 * Returning DFI ownership alone must never re-admit application DMA. */
+	dma_bench_software_ready_write(0);
+#endif
+}
+
 void sdram_software_control_on(void) {
 	unsigned int previous;
+	sdram_invalidate_dma();
 	previous = sdram_dfii_control_read();
 	/* Switch DFII to software control */
 	if (previous != DFII_CONTROL_SOFTWARE) {

@@ -320,3 +320,13 @@ before training. This preserves fixed 64 MiB transaction beat-count checks.
 The same measured-window and guard rules apply to both paths, using whichever
 traffic schedule the selected DMA engine produces. Enabling this option is not
 by itself hardware qualification of either interface.
+
+
+PHY or mode-register mutation invalidates DMA admission. Entering software DFI
+control clears the optional software-ready CSR, and returning hardware ownership
+does not set it. BIOS read/write-phase commands also invalidate admission before
+their direct CSR writes. Delay/bitslip overrides, standalone leveling and mode
+register commands enter software control and therefore follow the same rule.
+Only a complete successful initialization and final controller-path memory test
+re-establish normal admission; internal DMA refinement retains its scoped grant.
+Read-only status commands and builds without software DMA admission are unchanged.
