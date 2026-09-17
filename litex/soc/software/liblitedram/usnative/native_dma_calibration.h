@@ -157,7 +157,9 @@ static unsigned nd_dma_refine(unsigned *centers)
     if(!nd_program(centers,3,0)) return nb_fail(12);
     for(unsigned random=0;random<2;++random) {
         unsigned errors=nd_dma_check(random,0);
-        USNATIVE_DEBUG("DMA_DESKEW_FINAL pattern=%u errors=%u\n",random,errors);
+        unsigned mask=dma_bench_dq_error_mask_read();
+        USNATIVE_DEBUG("DMA_DESKEW_FINAL pattern=%u errors=%u mask=%04x\n",random,errors,mask);
+        if(errors==0xffffffffu || (!!errors != !!mask)) return nb_fail(16);
         if(errors) return nb_fail(19);
     }
     ddrphy_training_stage_write(5);USNATIVE_SNAPSHOT();

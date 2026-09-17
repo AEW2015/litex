@@ -85,30 +85,32 @@ static unsigned nd_dma_check(unsigned pattern,unsigned readonly) {
  if(readonly) {
   ++readonly_calls;
   if(taps[11]<22 || taps[11]>34) mask=1u<<11;
-  if(scenario==2 && (taps[14]<22 || taps[14]>36)) mask|=1u<<14;
+  if((scenario==2 || scenario==4) && (taps[14]<22 || taps[14]>36)) mask|=1u<<14;
  } else {
   ++fresh_calls;
   if(readonly_calls<58) return 0; /* Two initial reference writes. */
-  unsigned first=30,last=42;
+  unsigned first=(scenario==4 && taps[14]==34)?42:30,last=42;
   if(scenario==1) {first=22;last=34;}
   if(programmed_offset) {
    ++guard_calls;
    if(scenario==1 && programmed_offset<0) mask=1u<<11;
   }
   if(taps[11]<first || taps[11]>last) mask|=1u<<11;
-  if(scenario==2) {
-   if(taps[14]<26 || taps[14]>38) mask|=1u<<14;
+  if(scenario==2 || scenario==4) {
+   unsigned low=scenario==4?28:26;
+   if(taps[14]<low || taps[14]>low+12) mask|=1u<<14;
    if(programmed_offset && guard_calls<=3) {
     const unsigned observed[]={0x4000,0x4800,0x0800};
     mask=observed[guard_calls-1];
    }
   }
  }
+ if(scenario==3 && fresh_calls==127) {mask=1u<<11;return 0;}
  return !!mask;
 }
 #include "native_dma_calibration.h"
 int main(void) {
- for(scenario=0;scenario<3;++scenario) {
+ for(scenario=0;scenario<5;++scenario) {
   unsigned centers[16];for(unsigned bit=0;bit<16;++bit) centers[bit]=32;
   mask=readonly_calls=fresh_calls=stage=guard_calls=0;
   unsigned result=nd_dma_refine(centers);
@@ -121,6 +123,13 @@ int main(void) {
     * Both implicated DQs must be rescanned, even though only11 exhausted. */
    assert(!result && stage==5 && centers[11]==36 && centers[14]==32);
    assert(fresh_calls==245 && guard_calls==7);
+  } else if(scenario==3) {
+   assert(result==16 && !stage && fresh_calls==127);
+  } else if(scenario==4) {
+   /* Moving DQ14 to34 invalidates the earlier DQ11 measurement.
+    * The post-rescan guards must detect the coupling and deny success. */
+   assert(result==18 && !stage && centers[14]==34 && centers[11]==36);
+   assert(fresh_calls>232 && fresh_calls<260);
   } else {
    /* 22..34 permits centers 26..30, never 32. No second rescan. */
    assert(result==18 && !stage && centers[11]==30);

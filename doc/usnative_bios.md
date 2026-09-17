@@ -286,7 +286,7 @@ DQs (including earlier failing guards) one at a time, holding every other DQ at 
 scanned from tap 12 through 68 and back at two-tap spacing, using fresh 64 MiB
 counter and PRBS write/read transfers at every point. The accepted window is the
 longest contiguous intersection of all four observations, with at least five
-samples. All six center/?4-tap guards restart after changing a center. No guard
+samples. All six center/+/-4-tap guards restart after changing a center. No guard
 margin is relaxed, no unmeasured taps are accepted, and there is only one such
 recovery budget per initialization. A subsequent guard failure retains the
 existing bounded two-tap adjustment within the new measured bounds or fails.
