@@ -101,3 +101,10 @@ int sdram_usnative_bisc(void)
     return 1;
 }
 #endif
+
+#if defined(CONFIG_SDRAM_USNATIVE_DEBUG) && defined(CONFIG_SDRAM_USNATIVE_RX_DIAGNOSTIC)
+#if !defined(CONFIG_SDRAM_NATIVE_DMA_TEST) || !defined(CONFIG_SDRAM_DMA_SOFTWARE_ADMISSION)
+#error "RX diagnostic needs DMA engine and software admission"
+#endif
+#include "native_rx_diagnostic.h"
+#endif

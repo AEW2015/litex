@@ -56,6 +56,7 @@ int sdram_init(void);
 #if defined(CONFIG_SDRAM_USNATIVE_XEM8320) && defined(CONFIG_SDRAM_USNATIVE_DEBUG)
 /* Internal delay diagnostic only; a subsequent full sdram_init is required. */
 int sdram_usnative_bisc(void);
+int sdram_usnative_rx_delay(unsigned bit, unsigned tap);
 #endif
 
 /*-----------------------------------------------------------------------*/

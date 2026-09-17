@@ -201,6 +201,18 @@ define_command(sdram_init, sdram_init, "Initialize SDRAM (Init + Calibration)", 
 #if defined(CONFIG_SDRAM_USNATIVE_XEM8320) && defined(CONFIG_SDRAM_USNATIVE_DEBUG)
 define_command(sdram_bisc, sdram_usnative_bisc,
     "USNative BISC only (holds DDR reset; run sdram_init afterward)", LITEDRAM_CMDS);
+#ifdef CONFIG_SDRAM_USNATIVE_RX_DIAGNOSTIC
+static void sdram_rx_delay_handler(int nb_params, char **params)
+{
+    char *end;
+    if(nb_params!=2) {printf("sdram_rx_delay <dq 0..15> <tap 0..511>\n");return;}
+    unsigned bit=strtoul(params[0],&end,0);if(*end) return;
+    unsigned tap=strtoul(params[1],&end,0);if(*end) return;
+    sdram_usnative_rx_delay(bit,tap);
+}
+define_command(sdram_rx_delay, sdram_rx_delay_handler,
+    "Diagnostic: atomically set one native RX DQ delay", LITEDRAM_CMDS);
+#endif
 #endif
 
 /**

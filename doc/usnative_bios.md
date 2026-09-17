@@ -319,3 +319,24 @@ before training. This preserves fixed 64 MiB transaction beat-count checks.
 The same measured-window and guard rules apply to both paths, using whichever
 traffic schedule the selected DMA engine produces. Enabling this option is not
 by itself hardware qualification of either interface.
+
+
+### RX-only characterization branch
+
+`CONFIG_SDRAM_USNATIVE_RX_DIAGNOSTIC` adds `sdram_rx_delay <dq> <tap>` only to
+native debug firmware with the DMA engine and software admission. This is a
+separate diagnostic branch, not part of the proposed normal initialization.
+The command requires trained idle DDR, changes one DQ on the CPU with DFI owned
+by software only during the bounded tap update, returns ownership and VTC, and
+prints actual tap counts before/after VTC plus the paused-refresh CPU cycle
+count. It attempts the original tap on programming/readiness failure and leaves
+DMA unavailable on failure. A failed rollback requires FPGA baseline restoration.
+
+The host RX runner holds the normal global board lock and restores the baseline
+bitstream on every outcome. It tests DQ11 at 32/34/36/38/40 in both directions,
+first repeating reads without rewriting the seeded pattern, then comparing fresh
+write/read traffic. No BISC, TX or gate adjustment occurs. It restores the
+original tap and selector after the sweep. Pauses exceeding one millisecond abort
+the experiment; measured pause duration must accompany any retention inference.
+Host tests verify refusals, local rollback, DMA admission and transport cleanup.
+These tests do not establish hardware eye width or memory retention.
