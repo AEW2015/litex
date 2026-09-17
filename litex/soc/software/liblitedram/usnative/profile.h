@@ -24,11 +24,11 @@
 #error "USNative calibration requires acknowledged RIU access and registered tap status"
 #endif
 #ifdef CONFIG_SDRAM_USNATIVE_DMA_CALIBRATION
-#if !defined(CONFIG_SDRAM_NATIVE_DMA_TEST) || !defined(CONFIG_SDRAM_NATIVE_DMA_BANK_GROUP_INTERLEAVING)
-#error "USNative DMA calibration requires the paired DMA benchmark configuration"
+#if !defined(CONFIG_SDRAM_NATIVE_DMA_TEST)
+#error "USNative DMA calibration requires the DMA benchmark configuration"
 #endif
 #if !defined(CSR_DMA_BENCH_START_ADDR) || !defined(CSR_DMA_BENCH_DQ_ERROR_MASK_ADDR) || !defined(CSR_DMA_BENCH_DATA_WIDTH_ADDR)
-#error "USNative calibration requires the paired DMA engine with per-DQ error reporting"
+#error "USNative calibration requires a DMA engine with per-DQ error reporting"
 #endif
 #endif
 

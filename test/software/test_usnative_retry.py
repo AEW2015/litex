@@ -96,9 +96,9 @@ struct nb_window {unsigned first,last,center,short_window;};
 struct nb_result {struct nb_window ck,rx[2],dq[2];};
 static unsigned admission=1,stage,error,bisc_only,reset,owner;
 static unsigned fail_cal=1,fail_memory,calibrations,memtests,bisc_calls,bisc_ok=1;
-static unsigned refine_error,refine_calls;
+static unsigned refine_error,refine_calls,dma_width=256;
 static void dma_bench_software_ready_write(unsigned v) {admission=v;}
-static unsigned dma_bench_data_width_read(void) {return 256;}
+static unsigned dma_bench_data_width_read(void) {return dma_width;}
 static void sdram_software_control_on(void) {owner=1;}
 static void sdram_software_control_off(void) {owner=0;}
 static unsigned sdram_get_freq(void) {return 3200000000u;}
@@ -144,6 +144,10 @@ int main(void) {
 #ifdef CONFIG_SDRAM_USNATIVE_DMA_CALIBRATION
  refine_error=17;assert(!sdram_init() && !admission && error==17);
  assert(refine_calls==6);
+ unsigned prior_calibrations=calibrations;
+ dma_width=128;refine_error=0;
+ assert(!sdram_init() && !admission && error==21 && reset);
+ assert(calibrations==prior_calibrations && refine_calls==6);
 #endif
  return 0;
 }

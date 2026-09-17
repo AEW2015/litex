@@ -120,7 +120,7 @@ int main(void) {{
         self.compile_run(self.profile(extra="#include <stdio.h>\n#define CONFIG_SDRAM_USNATIVE_DEBUG\n" + dma,
             check='USNATIVE_DEBUG("debug enabled\\n");'))
         self.compile_run(self.profile(extra=dma.replace(
-            "#define CONFIG_SDRAM_NATIVE_DMA_BANK_GROUP_INTERLEAVING\n", "")), False)
+            "#define CONFIG_SDRAM_NATIVE_DMA_BANK_GROUP_INTERLEAVING\n", "")))
 
     def test_dma_refinement_compiles_with_debug_on_and_off(self):
         source = r'''

@@ -16,7 +16,7 @@ static int sdram_usnative_init(void)
 {
 #ifdef CONFIG_SDRAM_USNATIVE_DMA_CALIBRATION
     if (dma_bench_data_width_read() != 256) {
-        printf("USNative calibration requires 256-bit paired DMA.\n");
+        printf("USNative calibration requires 256-bit DMA.\n");
         nb_fail(21);
         return 0;
     }

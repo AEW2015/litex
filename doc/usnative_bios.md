@@ -35,12 +35,12 @@ software ownership, and the existing DDRCTRL error/status reporting is updated.
 # Optional detailed scan output and diagnostic snapshot CSRs.
 self.add_config("SDRAM_USNATIVE_DEBUG")
 
-# Optional counter/PRBS refinement using the local paired DMA engine.
+# Optional counter/PRBS refinement using the local 256-bit DMA engine.
 self.add_config("SDRAM_USNATIVE_DMA_CALIBRATION")
 ```
 
 These options are independent and disabled by default. DMA refinement requires
-the paired 256-bit DMA CSR interface, per-DQ error mask and its hardware timeout.
+a 256-bit DMA CSR interface, per-DQ error mask and its hardware timeout.
 It destroys 64 MiB starting at 0x41000000. Software also bounds polling when the
 hardware completion response never arrives. A failed/stuck DMA transaction must
 be reset/quiesced by the system before another attempt; firmware cannot cancel
@@ -116,7 +116,7 @@ calibration unless the separate `CONFIG_SDRAM_USNATIVE_DMA_CALIBRATION` option
 is selected.
 
 The board's explicit `--usnative-dma-calibration` option selects that firmware
-refinement only when USNative, DMA, paired bank-group scheduling, and a 256-bit
+refinement only when USNative, DMA, and a 256-bit
 DMA interface are all enabled. It is independent of `--usnative-debug`: debug
 controls verbose scan output, while DMA calibration controls the destructive
 counter/PRBS refinement itself. The default remains disabled. The refinement
@@ -307,3 +307,13 @@ window, other-DQ center preservation, engine/delay failures, restarted guards,
 and exhaustion without a second recovery. Hardware qualification is tracked in
 the board validation report; these host tests alone do not resolve the recorded
 hardware failures.
+
+
+Optional DMA calibration accepts both converted256 and paired256 benchmark
+interfaces. It remains explicitly selected by `--usnative-dma-calibration`;
+`--with-dma` alone does not change normal calibration. Firmware requires the
+benchmark error-mask CSRs and checks the actual DMA data-width CSR equals 256
+before training. This preserves fixed 64 MiB transaction beat-count checks.
+The same measured-window and guard rules apply to both paths, using whichever
+traffic schedule the selected DMA engine produces. Enabling this option is not
+by itself hardware qualification of either interface.
