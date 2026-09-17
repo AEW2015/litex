@@ -310,8 +310,10 @@ hardware failures.
 
 
 Optional DMA calibration accepts both converted256 and paired256 benchmark
-interfaces. It remains explicitly selected by `--usnative-dma-calibration`;
-`--with-dma` alone does not change normal calibration. Firmware requires the
+interfaces. Firmware selects it through `CONFIG_SDRAM_USNATIVE_DMA_CALIBRATION`.
+The XEM8320 target enables this for native 256-bit DMA performance/example builds;
+CPU-only and component-PHY builds keep their normal initialization. The explicit
+`--usnative-dma-calibration` request also remains available. Firmware requires the
 benchmark error-mask CSRs and checks the actual DMA data-width CSR equals 256
 before training. This preserves fixed 64 MiB transaction beat-count checks.
 The same measured-window and guard rules apply to both paths, using whichever
