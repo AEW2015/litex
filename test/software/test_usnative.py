@@ -371,6 +371,7 @@ int main(void) {
         self.compile_run(r"""
 #include <assert.h>
 #include <stdio.h>
+#define SDRAM_PHY_USPDDRPHY
 #define SDRAM_PHY_MODULES 1
 #define DQ_COUNT 1
 #define SDRAM_PHY_WRITE_LEVELING_CAPABLE
