@@ -111,16 +111,17 @@ same command reports `mode=paired-bank-group-interleaved`. This opt-in hardware
 uses two 128-bit bank-group streams as one 256-bit benchmark interface and waits
 for both write paths to drain before starting reads. A sticky error from either
 stream prevents further traffic through the engine. The standard native-port
-mode remains the default, and neither mode enables automatic startup DMA
-calibration unless the separate `CONFIG_SDRAM_USNATIVE_DMA_CALIBRATION` option
-is selected.
+mode remains the default. Firmware DMA refinement is selected through
+`CONFIG_SDRAM_USNATIVE_DMA_CALIBRATION`; the XEM8320 target enables it for native
+256-bit DMA performance/example builds, with either converted or paired traffic.
 
 The board's explicit `--usnative-dma-calibration` option selects that firmware
 refinement only when USNative, DMA, and a 256-bit
 DMA interface are all enabled. It is independent of `--usnative-debug`: debug
 controls verbose scan output, while DMA calibration controls the destructive
-counter/PRBS refinement itself. The default remains disabled. The refinement
-uses scratch memory through `0x44ffffff`, requires the paired engine's per-DQ
+counter/PRBS refinement itself. CPU-only, native128 DMA and component-PHY builds
+retain their existing initialization policy. The refinement uses scratch memory
+through `0x44ffffff`, requires the DMA engine's per-DQ
 error-mask CSR, and runs during `sdram_init` before the final BIOS memory test.
 
 The optional command also supports component `USPDDRPHY` builds. These select
