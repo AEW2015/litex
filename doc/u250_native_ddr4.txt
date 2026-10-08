@@ -1,0 +1,13 @@
+U250 experimental Native DDR4 branch
+===================================
+
+Preserves the working AEW2015 Native integration baseline, and enables XCU250
+BSCANE2 JTAG management. The U250 example uses no CPU or DDR Wishbone aperture;
+full 16-GiB addresses go to native DMA reader/writer ports. JTAGBone controls
+CSRs only. This branch does not make CPU calibration firmware x4-qualified.
+
+Project, matching dependency branches and instructions:
+https://github.com/AEW2015/litex-boards/tree/u250/native-ddr4-2400/examples/u250_native_2400
+
+The delivered design is an offline experimental bitstream candidate; there
+are no U250 hardware calibration or measured DMA-throughput results.
