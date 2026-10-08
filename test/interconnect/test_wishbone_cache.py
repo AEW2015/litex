@@ -21,11 +21,12 @@ def initial_word(address):
 
 class CacheDUT(LiteXModule):
     def __init__(self, width=128, reverse=False, bursting=False, latency=1, full_we=False,
-        refill_bypass=False, master_width=32):
+        refill_bypass=False, master_width=32, write_pipeline=False, continuous_ack=False):
         self.master = master = wishbone.Interface(data_width=master_width, address_width=16)
         self.slave = slave = wishbone.Interface(data_width=width, address_width=16)
         cache = wishbone.Cache(64, master, slave, reverse=reverse,
-            with_bursting=bursting, with_refill_bypass=refill_bypass)
+            with_bursting=bursting, with_refill_bypass=refill_bypass,
+            with_write_pipeline=write_pipeline)
         self.cache = FullMemoryWE()(cache) if full_we else cache
         ratio = width//32
         init = [sum(initial_word(index*ratio + lane) << (32*(ratio-1-lane if reverse else lane))
@@ -42,11 +43,18 @@ class CacheDUT(LiteXModule):
         ]
         for byte in range(width//8):
             self.comb += port.we[byte].eq(slave.ack & slave.we & slave.sel[byte])
-        self.sync += If(~slave.cyc | ~slave.stb | slave.ack,
-            count.eq(0)
-        ).Else(
-            count.eq(count + 1)
-        )
+        if continuous_ack:
+            self.sync += If(~slave.cyc | ~slave.stb,
+                count.eq(0)
+            ).Elif(count < latency,
+                count.eq(count + 1)
+            )
+        else:
+            self.sync += If(~slave.cyc | ~slave.stb | slave.ack,
+                count.eq(0)
+            ).Else(
+                count.eq(count + 1)
+            )
 
 
 def transfer(bus, beats, stalls=None, bte=0):
@@ -299,6 +307,114 @@ def test_wide_master_refill_and_narrow_slave_fallback(width, reverse):
 
         run_simulation(dut, generator())
     assert first_reads[1] == first_reads[0] - int(width >= 64)
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("refill_bypass", [False, True])
+@pytest.mark.parametrize("full_we", [False, True])
+@pytest.mark.parametrize("latency", [1, 4])
+def test_pipelined_write_masks_refill_and_eviction(reverse, refill_bypass, full_we, latency):
+    # A 64-bit CPU over a 32-bit slave requires two consecutive slave ACKs to
+    # refill one cache word, exercising the one-beat write pipeline at full
+    # input rate. It also reads immediately after a masked cache hit, then
+    # exercises the dirty eviction path.
+    observed = []
+    refill_ack_history = []
+    writeback_seen = []
+    address = 128
+    # This address has the same cache index and a different tag.
+    conflict = address + 32
+    for write_pipeline in [False, True]:
+        dut = CacheDUT(width=32, reverse=reverse, master_width=64, latency=latency,
+            refill_bypass=refill_bypass, full_we=full_we,
+            write_pipeline=write_pipeline, continuous_ack=True)
+        refill_ack_cycles = []
+        writeback_cycles = []
+        transactions = []
+
+        @passive
+        def monitor():
+            cycle = 0
+            while True:
+                if (yield dut.slave.cyc) and (yield dut.slave.stb) and (yield dut.slave.ack):
+                    if (yield dut.slave.we):
+                        writeback_cycles.append(cycle)
+                    else:
+                        refill_ack_cycles.append(cycle)
+                cycle += 1
+                yield
+
+        def generator():
+            values, _ = yield from transfer(dut.master,
+                [(address, None, 0xff, wishbone.CTI_BURST_NONE)])
+            transactions.append(values)
+            values, _ = yield from transfer(dut.master,
+                [(address, 0x005a000000000000, 0x40, wishbone.CTI_BURST_NONE)])
+            transactions.append(values)
+            # Immediate same-line read exercises the pending-write collision.
+            values, _ = yield from transfer(dut.master,
+                [(address, None, 0xff, wishbone.CTI_BURST_NONE)])
+            transactions.append(values)
+            # Dirty eviction exercises the queued-data writeback path.
+            yield from transfer(dut.master,
+                [(conflict, None, 0xff, wishbone.CTI_BURST_NONE)])
+            values, _ = yield from transfer(dut.master,
+                [(address, None, 0xff, wishbone.CTI_BURST_NONE)])
+            transactions.append(values)
+
+        run_simulation(dut, [generator(), monitor()])
+        observed.append(transactions)
+        refill_ack_history.append(refill_ack_cycles)
+        writeback_seen.append(writeback_cycles)
+
+    # Compare the pipelined implementation against the original cache for
+    # returned data; this width pair also exercises the narrow-slave refill
+    # and eviction paths, whose lane ordering is covered by the baseline test.
+    assert observed[1] == observed[0]
+    before_write = observed[1][0][0]
+    expected_masked = (before_write & ~0x00ff000000000000) | 0x005a000000000000
+    assert observed[1][2] == [expected_masked]
+    assert len(refill_ack_history[1]) >= 2
+    if latency == 1:
+        assert refill_ack_history[1][1] == refill_ack_history[1][0] + 1
+    assert writeback_seen[1]
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("refill_bypass", [False, True])
+@pytest.mark.parametrize("full_we", [False, True])
+def test_pipelined_wide_slave_cpu_lane_write(reverse, refill_bypass, full_we):
+    # Match the common 32-bit CPU / 256-bit LiteDRAM cache arrangement. A CPU
+    # store updates one selected 32-bit lane in the wide cache RAM.
+    results = []
+    address = 129
+    conflict = address + 64
+    for write_pipeline in [False, True]:
+        dut = CacheDUT(width=256, reverse=reverse, master_width=32, latency=1,
+            refill_bypass=refill_bypass, full_we=full_we,
+            write_pipeline=write_pipeline)
+        reads = []
+
+        def generator():
+            values, _ = yield from transfer(dut.master,
+                [(address, None, 0xf, wishbone.CTI_BURST_NONE)])
+            reads.append(values[0])
+            yield from transfer(dut.master,
+                [(address, 0xdeadbeef, 0xf, wishbone.CTI_BURST_NONE)])
+            values, _ = yield from transfer(dut.master,
+                [(address, None, 0xf, wishbone.CTI_BURST_NONE)])
+            reads.append(values[0])
+            yield from transfer(dut.master,
+                [(conflict, None, 0xf, wishbone.CTI_BURST_NONE)])
+            values, _ = yield from transfer(dut.master,
+                [(address, None, 0xf, wishbone.CTI_BURST_NONE)])
+            reads.append(values[0])
+
+        run_simulation(dut, generator())
+        results.append(reads)
+
+    assert results[1] == results[0]
+    assert results[1][1:] == [0xdeadbeef, 0xdeadbeef]
 
 
 @pytest.mark.parametrize("full_we", [False, True])

@@ -2406,6 +2406,7 @@ class LiteXSoC(SoC):
         l2_cache_bursting       = False,
         l2_cache_refill_bypass  = False,
         l2_cache_tag_mem_attrs  = None,
+        l2_cache_write_pipeline = False,
         **kwargs):
 
         # Checks.
@@ -2599,7 +2600,8 @@ class LiteXSoC(SoC):
                     reverse            = l2_cache_reverse,
                     with_bursting      = l2_cache_bursting,
                     with_refill_bypass = l2_cache_refill_bypass,
-                    tag_mem_attrs     = l2_cache_tag_mem_attrs)
+                    tag_mem_attrs      = l2_cache_tag_mem_attrs,
+                    with_write_pipeline = l2_cache_write_pipeline)
                 if l2_cache_full_memory_we:
                     l2_cache = FullMemoryWE()(l2_cache)
                 self.l2_cache = l2_cache

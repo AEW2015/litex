@@ -49,24 +49,58 @@ static int sdram_usnative_init(void)
         (unsigned)SDRAM_PHY_USNATIVE_ABI_MAJOR,
         (unsigned)SDRAM_PHY_USNATIVE_ABI_MINOR,
         (unsigned)SDRAM_PHY_USNATIVE_CONFIG_ID);
-    printf("USNativeDDRPHY: x16, %u MT/s, RD%u/WR%u (experimental)\n",
-        sdram_get_freq()/1000000u, USNATIVE_RDPHASE, SDRAM_PHY_WRPHASE);
+    printf("USNativeDDRPHY: x%u, %u.%03u MT/s, RD%u/WR%u (experimental)\n",
+        SDRAM_PHY_DATABITS,
+#ifdef CONFIG_SDRAM_USNATIVE_RATE_MILLI_MT
+        CONFIG_SDRAM_USNATIVE_RATE_MILLI_MT / 1000u,
+        CONFIG_SDRAM_USNATIVE_RATE_MILLI_MT % 1000u,
+#else
+        sdram_get_freq()/1000000u,
+        0u,
+#endif
+        USNATIVE_RDPHASE, SDRAM_PHY_WRPHASE);
+#ifdef CONFIG_SDRAM_USNATIVE_FPGA_NATIVE_CLOCK_OVER_SPEC
+    printf("WARNING: AES-KU40 XCKU040-1 native BITSLICE PLL clock exceeds its 2133 MHz DS892 limit; continuing with an experimental FPGA overclock.\n");
+#endif
+#ifdef CONFIG_SDRAM_USNATIVE_REFCLK_ATTRIBUTE_MISMATCH
+    printf("WARNING: RX/TX_REFCLK_FREQUENCY is capped at 2666.667 MHz while the native PLL_CLK is %u.%03u MHz; BISC TIME-delay calibration uses mismatched metadata.\n",
+        CONFIG_SDRAM_USNATIVE_RATE_MILLI_MT / 1000u,
+        CONFIG_SDRAM_USNATIVE_RATE_MILLI_MT % 1000u);
+#endif
     printf("Standalone native burst calibration (experimental)\n");
     sdram_software_control_on();
     ddrphy_training_stage_write(1); ddrphy_training_error_write(0);
 #if defined(CONFIG_SDRAM_USNATIVE_DEBUG) && defined(CSR_DDRPHY_DEBUG_CLEAR_ADDR)
     ddrphy_debug_clear_write(1);
 #endif
+#ifdef CONFIG_SDRAM_USNATIVE_DFI_DIAGNOSTIC
+    if (!nb_dfi_diagnostic()) {
+        nb_fail(1);
+        printf("Native DFI diagnostic failed before calibration.\n");
+        return 0;
+    }
+#endif
     cdelay(1000);
     struct nb_result result;
-    unsigned error=nb_calibrate(&result);
+    unsigned error;
+    for (unsigned attempt=0; attempt<2; ++attempt) {
+        error=nb_calibrate(&result);
+        if (!error || error!=8 || attempt==1) break;
+        /* A marginal TX eye can shift between complete initializations.
+         * Reset DDR/BISC and repeat the full CK/RX/TX search once; never
+         * accept a short window or bypass the later memory test. */
+        printf("Native TX window retry exhausted; restarting full calibration once.\n");
+    }
     if (error) {
         printf("Native calibration failed: stage=%u error=%u\n",
             (unsigned)ddrphy_training_stage_read(), error);
         return 0;
     }
-    unsigned rx_centers[16];
-    error=nd_calibrate(3,rx_centers);
+    unsigned rx_centers[SDRAM_PHY_DATABITS];
+    unsigned coarse_rx_centers[USNATIVE_LANES];
+    for (unsigned lane=0;lane<USNATIVE_LANES;++lane)
+        coarse_rx_centers[lane]=result.rx[lane].center;
+    error=nd_calibrate(USNATIVE_LANE_MASK,rx_centers,coarse_rx_centers);
     if (error) {
         printf("Controller per-bit RX deskew failed: error=%u\n",error);
         return 0;
@@ -86,9 +120,9 @@ static int sdram_usnative_init(void)
         return 0;
     }
 #endif
-    USNATIVE_DEBUG("Native CK window [%u..%u], selected %u taps\n",
-        result.ck.first,result.ck.last,result.ck.center);
-    for (unsigned lane=0; lane<2; ++lane) {
+    USNATIVE_DEBUG("Native CK window [%u..%u], selected %u taps, phase %u gate %u\n",
+        result.ck.first,result.ck.last,result.ck.center,result.phase,result.gate);
+    for (unsigned lane=0; lane<USNATIVE_LANES; ++lane) {
         USNATIVE_DEBUG("Native lane %u direct RX [%u..%u] -> %u (superseded by per-bit deskew), DQ/DM [%u..%u] -> %u, DQS 68\n",
             lane,result.rx[lane].first,result.rx[lane].last,result.rx[lane].center,
             result.dq[lane].first,result.dq[lane].last,result.dq[lane].center);

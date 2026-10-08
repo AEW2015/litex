@@ -1,8 +1,8 @@
 # Experimental USNative BIOS initialization
 
 This adds an explicit BIOS startup path for the XEM8320 x16 native DDR4
-integration. Its versioned logical mapping is portable, while training remains
-limited to the documented x16 timing profiles. The coordinated LiteDRAM
+integration. Its versioned logical mapping is portable; additional source
+profiles include x32 and provisional reduced-width x64 DDR4. The coordinated LiteDRAM
 feature branch supplies the complete initial PHY/CSR ABI; the litex-boards
 feature branch selects it explicitly for Vivado.
 
@@ -41,6 +41,9 @@ self.add_config("SDRAM_USNATIVE_DMA_CALIBRATION")
 
 These options are independent and disabled by default. DMA refinement requires
 a 256-bit DMA CSR interface, per-DQ error mask and its hardware timeout.
+Its current scoring implementation supports x16 only; x32/x64 refinement is
+explicitly rejected rather than truncating the DQ mask. This restriction does
+not apply to the separate native DMA benchmark command.
 It destroys 64 MiB starting at 0x41000000. Software also bounds polling when the
 hardware completion response never arrives. A failed/stuck DMA transaction must
 be reset/quiesced by the system before another attempt; firmware cannot cancel
@@ -53,6 +56,15 @@ selection, RIU and readiness CSRs are calibration controls, even when verbose
 diagnostics are off.
 
 ## Supported initial interface
+
+The provisional x64 path uses eight byte lanes and eight 64-bit DFI phases
+through a reduced-width 1:8 converter: 1600 MT/s at 100 MHz (CL11/CWL9,
+RD0/WR2), or 2400 MT/s at 150 MHz (CL17/CWL12, RD2/WR3). It accounts for
+DQ0–63 in CPU deskew and optional eye scans and preserves 64-bit DMA error
+masks. Eight phases carry 512 bits per controller cycle, half the full x64
+1:8 payload. The BIOS rejects x64 with 128-bit DFI phases or the x32 dual-slot
+flag. Compilation and host fixtures are not hardware qualification; the target
+must verify the actual FPGA, DIMM geometry and rate limits independently.
 
 - XEM8320 x16 DDR4, four 32-bit DFI phases, eight-bit serializers, 512 delay taps,
   eight bitslips and registered TX with command latency 5.

@@ -6,9 +6,54 @@
 #ifndef __USNATIVE_PROFILE_H
 #define __USNATIVE_PROFILE_H
 
-/* Mapping is portable; this training algorithm currently supports x16 DDR4. */
-#if !defined(SDRAM_PHY_DDR4) || SDRAM_PHY_DATABITS != 16 || SDRAM_PHY_DFI_DATABITS != 32 || SDRAM_PHY_PHASES != 4 || SDRAM_PHY_XDR != 2
-#error "USNative calibration requires x16 DDR4 with four 32-bit DFI phases"
+#include <stdint.h>
+
+/* Direct DFII probes cover one BL8 burst in four or eight phases. */
+#if !defined(SDRAM_PHY_DDR4) || (SDRAM_PHY_DATABITS != 16 && SDRAM_PHY_DATABITS != 32 && SDRAM_PHY_DATABITS != 64) || SDRAM_PHY_XDR != 2 || \
+    ((SDRAM_PHY_PHASES == 4) && \
+        (SDRAM_PHY_DATABITS == 64 || SDRAM_PHY_DFI_DATABITS != 2*SDRAM_PHY_DATABITS)) || \
+    ((SDRAM_PHY_PHASES == 8) && \
+        !((SDRAM_PHY_DATABITS == 32 && SDRAM_PHY_DFI_DATABITS == SDRAM_PHY_DATABITS) || \
+          (defined(CONFIG_SDRAM_USNATIVE_DUAL_SLOT) && SDRAM_PHY_DATABITS == 32 && \
+           SDRAM_PHY_DFI_DATABITS == 64) || \
+          (SDRAM_PHY_DATABITS == 64 && SDRAM_PHY_DFI_DATABITS == 64 && \
+           !defined(CONFIG_SDRAM_USNATIVE_DUAL_SLOT)))) || \
+    (SDRAM_PHY_PHASES != 4 && SDRAM_PHY_PHASES != 8)
+#error "USNative calibration requires supported x16/x32 DDR4 or reduced x64 1:8 DFI geometry"
+#endif
+#if SDRAM_PHY_PHASES == 8 && defined(CONFIG_SDRAM_USNATIVE_DUAL_SLOT) && \
+    SDRAM_PHY_DATABITS == 32 && SDRAM_PHY_DFI_DATABITS == 64
+#define USNATIVE_DUAL_SLOT_FULL_WIDTH 1
+#else
+#define USNATIVE_DUAL_SLOT_FULL_WIDTH 0
+#endif
+#define USNATIVE_LANES (SDRAM_PHY_DATABITS/8)
+#define USNATIVE_LANE_MASK ((1u << USNATIVE_LANES)-1u)
+#if SDRAM_PHY_DATABITS == 64 && SDRAM_PHY_PHASES == 8 && \
+    SDRAM_PHY_DFI_DATABITS == 64 && !defined(CONFIG_SDRAM_USNATIVE_DUAL_SLOT)
+#define USNATIVE_REDUCED_X64_1TO8 1
+#else
+#define USNATIVE_REDUCED_X64_1TO8 0
+#endif
+#if defined(CONFIG_SDRAM_USNATIVE_DFI_DIAGNOSTIC) && \
+    (!defined(CONFIG_SDRAM_USNATIVE_DEBUG) || \
+     !defined(CONFIG_SDRAM_USNATIVE_WRITE_MONITOR) || \
+     SDRAM_PHY_DATABITS != 32 || SDRAM_PHY_DFI_DATABITS != 64 || \
+     !((SDRAM_PHY_PHASES == 8 && defined(CONFIG_SDRAM_USNATIVE_DUAL_SLOT)) || \
+       (SDRAM_PHY_PHASES == 4 && CONFIG_CLOCK_FREQUENCY == 200000000 && \
+        SDRAM_PHY_CL == 11 && SDRAM_PHY_CWL == 9 && \
+        SDRAM_PHY_RDPHASE == 0 && SDRAM_PHY_WRPHASE == 2)))
+#error "USNative DFI diagnostic requires debug/write monitor and x32 1:4 1600 or dual-slot 1:8 DFI"
+#endif
+#if SDRAM_PHY_DATABITS == 32
+#define USNATIVE_TX_SCAN_END 240
+#else
+#define USNATIVE_TX_SCAN_END 176
+#endif
+#if SDRAM_PHY_DFI_DATABITS == 64
+typedef uint64_t usnative_dfi_word_t;
+#else
+typedef uint32_t usnative_dfi_word_t;
 #endif
 #if SDRAM_PHY_DELAYS != 512 || SDRAM_PHY_BITSLIPS != 8 || SDRAM_PHY_CMD_LATENCY != 5
 #error "USNative calibration requires the registered-TX native timing profile"
@@ -23,6 +68,9 @@
 #error "USNative calibration requires acknowledged RIU access and registered tap status"
 #endif
 #ifdef CONFIG_SDRAM_USNATIVE_DMA_CALIBRATION
+#if SDRAM_PHY_DATABITS != 16
+#error "USNative DMA calibration currently scores only x16 DQ lanes"
+#endif
 #if !defined(CONFIG_SDRAM_NATIVE_DMA_TEST)
 #error "USNative DMA calibration requires the DMA benchmark configuration"
 #endif
@@ -31,14 +79,92 @@
 #endif
 #endif
 
-#if CONFIG_CLOCK_FREQUENCY == 300000000 && SDRAM_PHY_CL == 17 && SDRAM_PHY_CWL == 12 && SDRAM_PHY_RDPHASE == 2 && SDRAM_PHY_WRPHASE == 3
+#if CONFIG_CLOCK_FREQUENCY == 100000000 && SDRAM_PHY_CL == 11 && SDRAM_PHY_CWL == 9 && \
+    SDRAM_PHY_RDPHASE == 0 && SDRAM_PHY_WRPHASE == 2
+#if SDRAM_PHY_PHASES != 8 || \
+    !((SDRAM_PHY_DATABITS == 32 && SDRAM_PHY_DFI_DATABITS == 64 && \
+       defined(CONFIG_SDRAM_USNATIVE_DUAL_SLOT)) || \
+      (SDRAM_PHY_DATABITS == 64 && SDRAM_PHY_DFI_DATABITS == 64 && \
+       !defined(CONFIG_SDRAM_USNATIVE_DUAL_SLOT)))
+#error "1600 USNative profile requires x32 dual-slot or reduced x64 1:8 DFI and RD0/WR2"
+#endif
+#define USNATIVE_WR_ADDRESS sdram_dfii_pi2_address_write
+#define USNATIVE_WR_BANK sdram_dfii_pi2_baddress_write
+#define USNATIVE_WR_COMMAND command_p2
+#define USNATIVE_RD_ADDRESS sdram_dfii_pi0_address_write
+#define USNATIVE_RD_BANK sdram_dfii_pi0_baddress_write
+#define USNATIVE_RD_COMMAND command_p0
+#elif CONFIG_CLOCK_FREQUENCY == 200000000 && SDRAM_PHY_PHASES == 4 && \
+      SDRAM_PHY_DATABITS == 32 && SDRAM_PHY_DFI_DATABITS == 64 && \
+      SDRAM_PHY_CL == 11 && SDRAM_PHY_CWL == 9 && \
+      SDRAM_PHY_RDPHASE == 0 && SDRAM_PHY_WRPHASE == 2
+#define USNATIVE_WR_ADDRESS sdram_dfii_pi2_address_write
+#define USNATIVE_WR_BANK sdram_dfii_pi2_baddress_write
+#define USNATIVE_WR_COMMAND command_p2
+#define USNATIVE_RD_ADDRESS sdram_dfii_pi0_address_write
+#define USNATIVE_RD_BANK sdram_dfii_pi0_baddress_write
+#define USNATIVE_RD_COMMAND command_p0
+#elif CONFIG_CLOCK_FREQUENCY == 233333333 && SDRAM_PHY_PHASES == 4 && \
+      SDRAM_PHY_DATABITS == 32 && SDRAM_PHY_DFI_DATABITS == 64 && \
+      SDRAM_PHY_CL == 13 && SDRAM_PHY_CWL == 10 && \
+      SDRAM_PHY_RDPHASE == 2 && SDRAM_PHY_WRPHASE == 1
+#define USNATIVE_WR_ADDRESS sdram_dfii_pi1_address_write
+#define USNATIVE_WR_BANK sdram_dfii_pi1_baddress_write
+#define USNATIVE_WR_COMMAND command_p1
+#define USNATIVE_RD_ADDRESS sdram_dfii_pi2_address_write
+#define USNATIVE_RD_BANK sdram_dfii_pi2_baddress_write
+#define USNATIVE_RD_COMMAND command_p2
+#elif CONFIG_CLOCK_FREQUENCY == 266666667 && SDRAM_PHY_PHASES == 4 && \
+      SDRAM_PHY_DATABITS == 32 && SDRAM_PHY_DFI_DATABITS == 64 && \
+      SDRAM_PHY_CL == 15 && SDRAM_PHY_CWL == 11 && \
+      SDRAM_PHY_RDPHASE == 0 && SDRAM_PHY_WRPHASE == 0
+#define USNATIVE_WR_ADDRESS sdram_dfii_pi0_address_write
+#define USNATIVE_WR_BANK sdram_dfii_pi0_baddress_write
+#define USNATIVE_WR_COMMAND command_p0
+#define USNATIVE_RD_ADDRESS sdram_dfii_pi0_address_write
+#define USNATIVE_RD_BANK sdram_dfii_pi0_baddress_write
+#define USNATIVE_RD_COMMAND command_p0
+#elif CONFIG_CLOCK_FREQUENCY == 116666666 && SDRAM_PHY_CL == 13 && SDRAM_PHY_CWL == 10 && \
+      SDRAM_PHY_RDPHASE == 2 && SDRAM_PHY_WRPHASE == 1
+#if SDRAM_PHY_PHASES != 8 || SDRAM_PHY_DATABITS != 32 || SDRAM_PHY_DFI_DATABITS != 64 || \
+    !defined(CONFIG_SDRAM_USNATIVE_DUAL_SLOT)
+#error "1866.667 USNative profile requires x32, 1:8 dual-slot DFI and RD2/WR1"
+#endif
+#define USNATIVE_WR_ADDRESS sdram_dfii_pi1_address_write
+#define USNATIVE_WR_BANK sdram_dfii_pi1_baddress_write
+#define USNATIVE_WR_COMMAND command_p1
+#define USNATIVE_RD_ADDRESS sdram_dfii_pi2_address_write
+#define USNATIVE_RD_BANK sdram_dfii_pi2_baddress_write
+#define USNATIVE_RD_COMMAND command_p2
+#elif CONFIG_CLOCK_FREQUENCY == 133333333 && SDRAM_PHY_CL == 15 && SDRAM_PHY_CWL == 11 && \
+      SDRAM_PHY_RDPHASE == 0 && SDRAM_PHY_WRPHASE == 0
+#if SDRAM_PHY_PHASES != 8 || SDRAM_PHY_DATABITS != 32 || SDRAM_PHY_DFI_DATABITS != 64 || \
+    !defined(CONFIG_SDRAM_USNATIVE_DUAL_SLOT)
+#error "2133.333 USNative profile requires x32, 1:8 dual-slot DFI and RD0/WR0"
+#endif
+#define USNATIVE_WR_ADDRESS sdram_dfii_pi0_address_write
+#define USNATIVE_WR_BANK sdram_dfii_pi0_baddress_write
+#define USNATIVE_WR_COMMAND command_p0
+#define USNATIVE_RD_ADDRESS sdram_dfii_pi0_address_write
+#define USNATIVE_RD_BANK sdram_dfii_pi0_baddress_write
+#define USNATIVE_RD_COMMAND command_p0
+#elif CONFIG_CLOCK_FREQUENCY == 150000000 && SDRAM_PHY_PHASES == 8 && SDRAM_PHY_CL == 17 && SDRAM_PHY_CWL == 12 && SDRAM_PHY_RDPHASE == 2 && SDRAM_PHY_WRPHASE == 3
 #define USNATIVE_WR_ADDRESS sdram_dfii_pi3_address_write
 #define USNATIVE_WR_BANK sdram_dfii_pi3_baddress_write
 #define USNATIVE_WR_COMMAND command_p3
 #define USNATIVE_RD_ADDRESS sdram_dfii_pi2_address_write
 #define USNATIVE_RD_BANK sdram_dfii_pi2_baddress_write
 #define USNATIVE_RD_COMMAND command_p2
-#elif CONFIG_CLOCK_FREQUENCY == 333333333 && SDRAM_PHY_CL == 19 && SDRAM_PHY_CWL == 14 && SDRAM_PHY_RDPHASE == 0 && SDRAM_PHY_WRPHASE == 1
+#elif CONFIG_CLOCK_FREQUENCY == 300000000 && SDRAM_PHY_PHASES == 4 && SDRAM_PHY_CL == 17 && SDRAM_PHY_CWL == 12 && SDRAM_PHY_RDPHASE == 2 && SDRAM_PHY_WRPHASE == 3
+#define USNATIVE_WR_ADDRESS sdram_dfii_pi3_address_write
+#define USNATIVE_WR_BANK sdram_dfii_pi3_baddress_write
+#define USNATIVE_WR_COMMAND command_p3
+#define USNATIVE_RD_ADDRESS sdram_dfii_pi2_address_write
+#define USNATIVE_RD_BANK sdram_dfii_pi2_baddress_write
+#define USNATIVE_RD_COMMAND command_p2
+#elif (CONFIG_CLOCK_FREQUENCY == 333333333 || \
+       (SDRAM_PHY_PHASES == 8 && (CONFIG_CLOCK_FREQUENCY == 166666666 || CONFIG_CLOCK_FREQUENCY == 166666667))) && \
+      SDRAM_PHY_CL == 19 && SDRAM_PHY_CWL == 14 && SDRAM_PHY_RDPHASE == 0 && SDRAM_PHY_WRPHASE == 1
 #define USNATIVE_WR_ADDRESS sdram_dfii_pi1_address_write
 #define USNATIVE_WR_BANK sdram_dfii_pi1_baddress_write
 #define USNATIVE_WR_COMMAND command_p1
@@ -59,15 +185,50 @@
 #define USNATIVE_RD_ADDRESS sdram_dfii_pi2_address_write
 #define USNATIVE_RD_BANK sdram_dfii_pi2_baddress_write
 #define USNATIVE_RD_COMMAND command_p2
+#elif defined(CONFIG_SDRAM_USNATIVE_OVERCLOCK) && \
+      (CONFIG_CLOCK_FREQUENCY == 183333333 || CONFIG_CLOCK_FREQUENCY == 183333334) && \
+      SDRAM_PHY_PHASES == 8 && SDRAM_PHY_DATABITS == 32 && SDRAM_PHY_DFI_DATABITS == 64 && \
+      defined(CONFIG_SDRAM_USNATIVE_DUAL_SLOT) && SDRAM_PHY_CL == 21 && SDRAM_PHY_CWL == 16 && \
+      SDRAM_PHY_RDPHASE == 2 && SDRAM_PHY_WRPHASE == 3
+#define USNATIVE_WR_ADDRESS sdram_dfii_pi3_address_write
+#define USNATIVE_WR_BANK sdram_dfii_pi3_baddress_write
+#define USNATIVE_WR_COMMAND command_p3
+#define USNATIVE_RD_ADDRESS sdram_dfii_pi2_address_write
+#define USNATIVE_RD_BANK sdram_dfii_pi2_baddress_write
+#define USNATIVE_RD_COMMAND command_p2
+#elif defined(CONFIG_SDRAM_USNATIVE_OVERCLOCK) && CONFIG_CLOCK_FREQUENCY == 200000000 && \
+      SDRAM_PHY_PHASES == 8 && SDRAM_PHY_DATABITS == 32 && SDRAM_PHY_DFI_DATABITS == 64 && \
+      defined(CONFIG_SDRAM_USNATIVE_DUAL_SLOT) && SDRAM_PHY_CL == 24 && SDRAM_PHY_CWL == 16 && \
+      SDRAM_PHY_RDPHASE == 3 && SDRAM_PHY_WRPHASE == 3
+#define USNATIVE_WR_ADDRESS sdram_dfii_pi3_address_write
+#define USNATIVE_WR_BANK sdram_dfii_pi3_baddress_write
+#define USNATIVE_WR_COMMAND command_p3
+#define USNATIVE_RD_ADDRESS sdram_dfii_pi2_address_write
+#define USNATIVE_RD_BANK sdram_dfii_pi2_baddress_write
+#define USNATIVE_RD_COMMAND command_p2
 #else
 #error "Unsupported USNative profile; high rates require explicit overclock configuration"
+#endif
+
+/* Keep rate-specific seed choices shared by 1:4 and 1:8 profiles. */
+#if CONFIG_CLOCK_FREQUENCY == 366666666 || CONFIG_CLOCK_FREQUENCY == 366666667 || \
+    CONFIG_CLOCK_FREQUENCY == 183333333 || CONFIG_CLOCK_FREQUENCY == 183333334
+#define USNATIVE_PROFILE_2933 1
+#else
+#define USNATIVE_PROFILE_2933 0
+#endif
+#if CONFIG_CLOCK_FREQUENCY == 400000000 || \
+    (CONFIG_CLOCK_FREQUENCY == 200000000 && SDRAM_PHY_CL == 24)
+#define USNATIVE_PROFILE_3200 1
+#else
+#define USNATIVE_PROFILE_3200 0
 #endif
 
 /* The 3200 routed profile resets its read-phase CSR to 3, but its trained
  * operating phase is 2. Direct-DFII probes and controller traffic must agree.
  * Bootstrap seeds only establish a starting point: all normal window, deskew,
  * guard and final memory checks remain mandatory. */
-#if CONFIG_CLOCK_FREQUENCY == 400000000
+#if USNATIVE_PROFILE_3200
 #define USNATIVE_RDPHASE 2
 #define USNATIVE_BOOT_TX_DELAY 72
 #define USNATIVE_BOOT_RX_DELAY 48
@@ -77,9 +238,9 @@
 #define USNATIVE_BOOT_RX_DELAY 32
 #endif
 
-#if CONFIG_CLOCK_FREQUENCY == 400000000
+#if USNATIVE_PROFILE_3200
 #define USNATIVE_GATE_DELAY 5
-#elif CONFIG_CLOCK_FREQUENCY == 366666666 || CONFIG_CLOCK_FREQUENCY == 366666667
+#elif USNATIVE_PROFILE_2933
 #define USNATIVE_GATE_DELAY 4
 #else
 #define USNATIVE_GATE_DELAY 3

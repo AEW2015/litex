@@ -10,6 +10,7 @@ from test.software import test_usnative as firmware
 
 DESCRIPTOR = r"""
 #include <assert.h>
+#define SDRAM_PHY_DATABITS 16
 #define SDRAM_PHY_USNATIVE_ABI_MAJOR 1
 #define SDRAM_PHY_USNATIVE_ABI_MINOR 0
 #define SDRAM_PHY_USNATIVE_CONFIG_ID 0x12345678u
@@ -61,7 +62,6 @@ int main(void) {
             "#undef SDRAM_PHY_USNATIVE_REQUIRED_CAPS\n#define SDRAM_PHY_USNATIVE_REQUIRED_CAPS 0",
             "#undef SDRAM_PHY_USNATIVE_ABI_MAJOR",
             "#undef SDRAM_PHY_USNATIVE_ABI_MAJOR\n#define SDRAM_PHY_USNATIVE_ABI_MAJOR 2",
-            "#undef SDRAM_PHY_USNATIVE_REQUIRED_CAPS\n#define SDRAM_PHY_USNATIVE_REQUIRED_CAPS 3",
             "#undef SDRAM_PHY_USNATIVE_DQ_TAPS_COUNT\n#define SDRAM_PHY_USNATIVE_DQ_TAPS_COUNT 32",
             "#undef CSR_DDRPHY_ABI_VERSION_ADDR",
         )
@@ -80,3 +80,67 @@ int main(void) {
         for change in changes:
             with self.subTest(change=change):
                 self.compile_run(DESCRIPTOR + change + '\n#include "mapping.h"\nint main(void) {assert(!usnative_mapping_validate());return 0;}')
+
+    def test_descriptor_counts_cover_one_through_eight_byte_lanes(self):
+        for lanes in (1, 2, 4, 8):
+            with self.subTest(lanes=lanes):
+                dq = tuple(range(8 * lanes))
+                dqs = tuple(range(8 * lanes, 9 * lanes))
+                ck = 9 * lanes
+                controls = tuple(range(lanes))
+                definitions = f'''
+#include <assert.h>
+#define SDRAM_PHY_DATABITS {8 * lanes}
+#define SDRAM_PHY_USNATIVE_ABI_MAJOR 1
+#define SDRAM_PHY_USNATIVE_ABI_MINOR 0
+#define SDRAM_PHY_USNATIVE_CONFIG_ID 0xabcdef01u
+#define SDRAM_PHY_USNATIVE_REQUIRED_CAPS 1u
+#define SDRAM_PHY_USNATIVE_DQ_TAPS_COUNT {len(dq)}
+#define SDRAM_PHY_USNATIVE_DQS_TAPS_COUNT {len(dqs)}
+#define SDRAM_PHY_USNATIVE_DM_TAPS_COUNT 0
+#define SDRAM_PHY_USNATIVE_CK_TAPS_COUNT 1
+#define SDRAM_PHY_USNATIVE_LANE_COUNT {lanes}
+#define SDRAM_PHY_USNATIVE_TAP_COUNT {ck + 1}
+#define SDRAM_PHY_USNATIVE_CONTROL_COUNT {lanes}
+#define SDRAM_PHY_USNATIVE_DATA_CONTROLS_COUNT {lanes}
+#define SDRAM_PHY_USNATIVE_DQ_TAPS {{{', '.join(map(str, dq))}}}
+#define SDRAM_PHY_USNATIVE_DQS_TAPS {{{', '.join(map(str, dqs))}}}
+#define SDRAM_PHY_USNATIVE_DM_TAPS {{0}}
+#define SDRAM_PHY_USNATIVE_CK_TAPS {{{ck}}}
+#define SDRAM_PHY_USNATIVE_DATA_CONTROLS {{{', '.join(map(str, controls))}}}
+#define CSR_DDRPHY_ABI_VERSION_ADDR 1
+#define CSR_DDRPHY_ABI_CONFIG_ID_ADDR 1
+#define CSR_DDRPHY_ABI_CAPABILITIES_ADDR 1
+static unsigned ddrphy_abi_version_read(void) {{return 0x10000u;}}
+static unsigned ddrphy_abi_config_id_read(void) {{return 0xabcdef01u;}}
+static unsigned ddrphy_abi_capabilities_read(void) {{return 1u;}}
+#include "mapping.h"
+int main(void) {{
+ assert(usnative_mapping_validate());
+ assert(USNATIVE_ARRAY_COUNT(usnative_dq_taps)==8*SDRAM_PHY_USNATIVE_LANE_COUNT);
+ assert(USNATIVE_ARRAY_COUNT(usnative_dqs_taps)==SDRAM_PHY_USNATIVE_LANE_COUNT);
+ assert(usnative_ck_taps[0]=={ck});
+ return 0;
+}}
+'''
+                self.compile_run(definitions)
+
+    def test_additional_capability_bits_are_forward_compatible_but_required(self):
+        source = DESCRIPTOR.replace(
+            "#define SDRAM_PHY_USNATIVE_REQUIRED_CAPS 1",
+            "#define SDRAM_PHY_USNATIVE_REQUIRED_CAPS 3")
+        source += r'''
+#include "mapping.h"
+int main(void) {
+ caps=3; assert(usnative_mapping_validate());
+ caps=7; assert(usnative_mapping_validate());
+ caps=1; assert(!usnative_mapping_validate());
+ return 0;
+}
+'''
+        self.compile_run(source)
+
+    def test_reject_phy_width_that_disagrees_with_lane_descriptor(self):
+        source = DESCRIPTOR.replace("#define SDRAM_PHY_DATABITS 16",
+                                    "#define SDRAM_PHY_DATABITS 32")
+        self.compile_run(source + '\n#include "mapping.h"\nint main(void) {return 0;}', False)

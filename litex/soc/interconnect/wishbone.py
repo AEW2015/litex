@@ -914,9 +914,14 @@ class Cache(LiteXModule):
     refill response; this adds a combinational path from slave data/ack to the master.
     tag_mem_attrs supplies optional synthesis attributes for the tag RAM; it
     does not change its synchronous read/write interface.
+    with_write_pipeline registers cache-data writes and commits them through a
+    separate memory port on the following cycle. This isolates the BRAM write
+    enable from the downstream acknowledgement path, at the cost of a cycle
+    after writes before the next cache lookup can start.
     """
     def __init__(self, cachesize, master, slave, reverse=True,
-        with_bursting=False, with_refill_bypass=False, tag_mem_attrs=None):
+        with_bursting=False, with_refill_bypass=False, tag_mem_attrs=None,
+        with_write_pipeline=False):
         self.master = master
         self.slave  = slave
 
@@ -969,8 +974,15 @@ class Cache(LiteXModule):
         # Data Memory.
         # ------------
         data_mem  = Memory(dw_to*2**wordbits, 2**linebits)
-        data_port = data_mem.get_port(write_capable=True, we_granularity=8)
-        self.specials += data_mem, data_port
+        if with_write_pipeline:
+            # Keep the synchronous read port independent from a registered
+            # write port so a delayed write does not alter cache read timing.
+            data_port = data_mem.get_port(read_capable=True)
+            data_write_port = data_mem.get_port(write_capable=True, we_granularity=8)
+            self.specials += data_mem, data_port, data_write_port
+        else:
+            data_port = data_mem.get_port(write_capable=True, we_granularity=8)
+            self.specials += data_mem, data_port
 
         write_from_slave = Signal()
         if adr_offset is None:
@@ -997,19 +1009,59 @@ class Cache(LiteXModule):
 
         self.comb += [
             data_port.adr.eq(adr_line),
-            If(write_from_slave,
-                displacer(slave.dat_r, word, data_port.dat_w),
-                displacer(Replicate(1, dw_to//8), word, data_port.we)
-            ).Else(
-                data_port.dat_w.eq(Replicate(master.dat_w, max(dw_to//dw_from, 1))),
-                If(master.cyc & master.stb & master.we & master.ack,
-                    displacer(master.sel, adr_offset, data_port.we, 2**offsetbits, reverse=reverse)
-                )
-            ),
             chooser(data_port.dat_r, word, slave.dat_w),
             slave.sel.eq(2**(dw_to//8)-1),
             chooser(read_data, read_offset, master.dat_r, reverse=reverse)
         ]
+        if with_write_pipeline:
+            write_pending = Signal()
+            write_pending_adr = Signal.like(adr_line)
+            write_pending_data = Signal.like(data_port.dat_r)
+            write_pending_we = Signal.like(data_write_port.we)
+            write_now = Signal()
+            write_now_adr = Signal.like(adr_line)
+            write_now_data = Signal.like(data_port.dat_r)
+            write_now_we = Signal.like(data_write_port.we)
+            master_write = master.cyc & master.stb & master.we & master.ack
+            self.comb += [
+                write_now.eq(write_from_slave | master_write),
+                write_now_adr.eq(adr_line),
+                If(write_from_slave,
+                    displacer(slave.dat_r, word, write_now_data),
+                    displacer(Replicate(1, dw_to//8), word, write_now_we)
+                ).Else(
+                    write_now_data.eq(Replicate(master.dat_w, max(dw_to//dw_from, 1))),
+                    If(master_write,
+                        displacer(master.sel, adr_offset, write_now_we,
+                            2**offsetbits, reverse=reverse)
+                    ).Else(
+                        write_now_we.eq(0)
+                    )
+                ),
+                data_write_port.adr.eq(write_pending_adr),
+                data_write_port.dat_w.eq(write_pending_data),
+                data_write_port.we.eq(Mux(write_pending, write_pending_we, 0)),
+            ]
+            self.sync += [
+                write_pending.eq(write_now),
+                If(write_now,
+                    write_pending_adr.eq(write_now_adr),
+                    write_pending_data.eq(write_now_data),
+                    write_pending_we.eq(write_now_we)
+                )
+            ]
+        else:
+            self.comb += [
+                If(write_from_slave,
+                    displacer(slave.dat_r, word, data_port.dat_w),
+                    displacer(Replicate(1, dw_to//8), word, data_port.we)
+                ).Else(
+                    data_port.dat_w.eq(Replicate(master.dat_w, max(dw_to//dw_from, 1))),
+                    If(master.cyc & master.stb & master.we & master.ack,
+                        displacer(master.sel, adr_offset, data_port.we, 2**offsetbits, reverse=reverse)
+                    )
+                )
+            ]
 
 
         # Tag memory.
@@ -1066,19 +1118,24 @@ class Cache(LiteXModule):
                 NextState("IDLE")
             )]
         refill_next = [NextState("TEST_HIT")]
+        if with_write_pipeline:
+            # A final refill write is committed one cycle later. Return to
+            # IDLE so the pending write drains before the synchronous lookup.
+            refill_next = [NextState("IDLE")]
         if with_refill_bypass and dw_to >= dw_from:
             # The whole cache line arrives in this beat. Return the requested
             # lane while filling RAM, avoiding the subsequent TEST_HIT cycle.
             # Writes still need TEST_HIT to apply byte enables and mark dirty.
+            refill_hit_next = [NextState("IDLE")] if with_write_pipeline else hit_next
             refill_next = [If(master.cyc & master.stb & ~master.we,
                 master.ack.eq(1),
                 read_from_refill.eq(1),
-                *hit_next,
+                *refill_hit_next,
             ).Else(
-                NextState("TEST_HIT")
+                NextState("IDLE" if with_write_pipeline else "TEST_HIT")
             )]
         fsm.act("IDLE",
-            If(master.cyc & master.stb,
+            If(master.cyc & master.stb & (~write_pending if with_write_pipeline else 1),
                 NextState("TEST_HIT")
             )
         )

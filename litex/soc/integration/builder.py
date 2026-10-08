@@ -416,7 +416,9 @@ class Builder:
 
     def _generate_rom_software(self, compile_bios=True):
         # Compile all software packages.
-        cpu_count = os.cpu_count() or 1
+        cpu_count = int(os.environ.get("LITEX_SOFTWARE_JOBS", os.cpu_count() or 1))
+        if cpu_count < 1:
+            raise ValueError("LITEX_SOFTWARE_JOBS must be positive")
         for name, src_dir in self.software_packages:
             # Skip BIOS compilation when disabled.
             if name == "bios" and not compile_bios:

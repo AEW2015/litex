@@ -203,6 +203,9 @@ define_command(sdram_init, sdram_init, "Initialize SDRAM (Init + Calibration)", 
 #if defined(CONFIG_SDRAM_USNATIVE) && defined(CONFIG_SDRAM_USNATIVE_DEBUG)
 define_command(sdram_bisc, sdram_usnative_bisc,
     "USNative BISC only (holds DDR reset; run sdram_init afterward)", LITEDRAM_CMDS);
+#include <liblitedram/usnative/native_dq_eye.h>
+define_command(usnative_eye, usnative_eye_handler,
+    "Measure opt-in per-DQ USNative RX/TX tap windows", LITEDRAM_CMDS);
 #endif
 
 /**

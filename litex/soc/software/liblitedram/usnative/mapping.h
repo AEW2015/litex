@@ -14,11 +14,16 @@
 #if !defined(CSR_DDRPHY_ABI_VERSION_ADDR) || !defined(CSR_DDRPHY_ABI_CONFIG_ID_ADDR) || !defined(CSR_DDRPHY_ABI_CAPABILITIES_ADDR)
 #error "USNative firmware requires runtime mapping identity CSRs"
 #endif
-#if !defined(SDRAM_PHY_USNATIVE_REQUIRED_CAPS) || SDRAM_PHY_USNATIVE_REQUIRED_CAPS != 1u
-#error "USNative mapping requires unsupported capabilities"
+#define USNATIVE_CAP_LOGICAL_TAP_CONTROL 1u
+#if !defined(SDRAM_PHY_USNATIVE_REQUIRED_CAPS) || \
+    (SDRAM_PHY_USNATIVE_REQUIRED_CAPS & USNATIVE_CAP_LOGICAL_TAP_CONTROL) != USNATIVE_CAP_LOGICAL_TAP_CONTROL
+#error "USNative firmware requires logical tap/control addressing"
 #endif
 #if SDRAM_PHY_USNATIVE_LANE_COUNT < 1 || SDRAM_PHY_USNATIVE_LANE_COUNT > 8 || SDRAM_PHY_USNATIVE_DQ_TAPS_COUNT != 8 * SDRAM_PHY_USNATIVE_LANE_COUNT || SDRAM_PHY_USNATIVE_DQS_TAPS_COUNT != SDRAM_PHY_USNATIVE_LANE_COUNT
 #error "USNative mapping requires one DQS and eight DQ taps per byte lane"
+#endif
+#if !defined(SDRAM_PHY_DATABITS) || SDRAM_PHY_DATABITS != 8 * SDRAM_PHY_USNATIVE_LANE_COUNT
+#error "USNative logical lane count must match the PHY data width"
 #endif
 #if SDRAM_PHY_USNATIVE_DM_TAPS_COUNT != 0 && SDRAM_PHY_USNATIVE_DM_TAPS_COUNT != SDRAM_PHY_USNATIVE_LANE_COUNT
 #error "USNative mapping requires zero or one DM tap per byte lane"
