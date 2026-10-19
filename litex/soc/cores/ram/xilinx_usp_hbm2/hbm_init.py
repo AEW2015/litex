@@ -33,11 +33,40 @@ class InitError(RuntimeError):
     pass
 
 
+def load_profile(profile=PROFILE, *, hbm_mhz=None):
+    """Select a reviewed destructive operating point; no hardware is accessed."""
+    p = json.loads(Path(profile).read_text())
+    if (p['reference_mhz'], p['hbm_mhz'], p['stacks'], p['regions_per_stack']) != (200, 900, 2, 8):
+        raise InitError("Expected the reviewed FK33 200/900 MHz boot profile")
+    selected = p['hbm_mhz'] if hbm_mhz is None else hbm_mhz
+    if type(selected) is not int or selected not in (800, 900):
+        raise InitError("Only destructive 800/900 MHz HBM profiles are supported")
+    expected = {800: [0xa402, 0x6300, 0x1212], 900: [0xa482, 0x9600, 0x1414]}
+    profiles = p.get('destructive_clock_profiles', {})
+    if set(profiles) != {'800', '900'} or p.get('retentive_supported') is not False:
+        raise InitError("Missing destructive-only operating profile policy")
+    for mhz, words in expected.items():
+        row = profiles[str(mhz)]
+        if row['pll_words'] != words or row['refresh_period_cycles'] != 39 * mhz // 10:
+            raise InitError("Clock profile differs from reviewed 200 MHz reference values")
+    if [row['address'] for row in p['pll'][:3]] != [0x200000, 0x200004, 0x200008]:
+        raise InitError("PLL override addresses differ from the reviewed layout")
+    refresh = [row for row in p['mc'] if row['address'] == 0x1040cc]
+    if len(refresh) != 1:
+        raise InitError("Expected one REF_PER register")
+    p['hbm_mhz'] = selected
+    p['name'] = f'fk33-ref200-hbm{selected}-destructive-runtime'
+    for row, value in zip(p['pll'][:3], profiles[str(selected)]['pll_words']):
+        row['value'] = value
+    refresh[0]['value'] = profiles[str(selected)]['refresh_period_cycles']
+    return p
+
+
 class ColdInitializer:
     def __init__(self, transport, trace, profile=PROFILE, *, sleep=time.sleep,
-                 monotonic=time.monotonic, poll_deadline_s=30.0):
+                 monotonic=time.monotonic, poll_deadline_s=30.0, hbm_mhz=None):
         self.transport = transport
-        self.profile = json.loads(Path(profile).read_text())
+        self.profile = load_profile(profile, hbm_mhz=hbm_mhz)
         self.trace = trace
         self.sleep = sleep
         self.clock = monotonic
@@ -46,8 +75,8 @@ class ColdInitializer:
             raise ValueError("Poll deadline must be positive")
         self.step = "not_started"
         p = self.profile
-        if (p['reference_mhz'], p['hbm_mhz'], p['stacks'], p['regions_per_stack']) != (200, 1000, 2, 8):
-            raise InitError("Only reviewed FK33 200/1000 MHz two-stack profile is supported")
+        if (p['reference_mhz'], p['stacks'], p['regions_per_stack']) != (200, 2, 8):
+            raise InitError("Only reviewed FK33 200 MHz reference two-stack profile is supported")
         for key, count in [('ms_pre', 11), ('pll', 16), ('ms_post', 3), ('phy', 9), ('mc', 42)]:
             if len(p[key]) != count:
                 raise InitError(f"Incomplete {key} register table")

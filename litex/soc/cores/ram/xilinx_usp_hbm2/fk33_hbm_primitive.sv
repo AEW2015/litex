@@ -1,7 +1,6 @@
-// FK33 fixed 250 MHz AXI / 100 MHz APB / 200 MHz reference / 1000 MHz HBM profile.
-// The primitive tool model remains 1800 MT/s, the supported maximum. Software
-// programs the HBM PLL to 1000 MHz (2000 MT/s), an experimental FPGA overclock.
-// PL timing closure does not qualify the overclocked HBM controller/PHY.
+// FK33 fixed 250 MHz AXI / 100 MHz APB / 200 MHz reference; 900 MHz HBM boot.
+// Software supports 800/900 MHz only by destructive reset and recalibration.
+// The primitive tool model remains 1800 MT/s, covering the maximum boot rate.
 // Replaces only the generated hbm_0 boundary. No XCI initializer is instantiated.
 // Software must initialize/calibrate both stacks before asserting sw_ready.
 // sw_ready and temperature shadows originate in the SoC SYS clock domain.

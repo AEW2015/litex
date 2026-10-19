@@ -329,17 +329,17 @@ class PrimitiveHBM2(USPHBM2):
     directory containing fk33_hbm_primitive.sv and fk33_hbm_control.sv.
     The fixed FK33 profile requires software initialization before READY.
     Withdrawing READY resets AXI interfaces; retention is not qualified.
-    The 1000 MHz software profile exceeds the FPGA controller specification.
-    The primitive uses its supported 1800 MT/s tool model; PL timing closure
-    does not establish timing qualification of 2000 MT/s HBM operation.
+    The 200 MHz reference profile boots at 900 MHz HBM. Software may select
+    800/900 MHz only through complete destructive reset and recalibration.
+    The primitive model remains at its supported 1800 MT/s maximum.
     """
 
     def __init__(self, platform, hbm_ip_name="hbm_0", *, rtl_dir=None,
-                 stacks=2, hbm_clk_freq=1000e6, axi_clk_freq=250e6,
+                 stacks=2, hbm_clk_freq=900e6, axi_clk_freq=250e6,
                  ref_clk_freq=200e6, apb_clk_freq=100e6):
         expected = {
             "stacks": (stacks, 2),
-            "hbm_clk_freq": (hbm_clk_freq, 1000e6),
+            "hbm_clk_freq": (hbm_clk_freq, 900e6),
             "axi_clk_freq": (axi_clk_freq, 250e6),
             "ref_clk_freq": (ref_clk_freq, 200e6),
             "apb_clk_freq": (apb_clk_freq, 100e6),
@@ -365,12 +365,12 @@ class PrimitiveHBM2(USPHBM2):
                          apb_clk_freq=apb_clk_freq, generate_ip=False,
                          xci_path=None, ip_config={})
 
-        # Keep the software operating point distinct from the supported tool
-        # model. Constants describe configuration, not a measured HBM clock.
-        self.operating_clock_mhz = CSRConstant(1000, name="operating_clock_mhz")
-        self.operating_data_rate_mt_s = CSRConstant(2000, name="operating_data_rate_mt_s")
+        # Constants describe the boot profile and supported tool model, not a
+        # measured clock. Firmware reports the active destructive profile.
+        self.operating_clock_mhz = CSRConstant(900, name="operating_clock_mhz")
+        self.operating_data_rate_mt_s = CSRConstant(1800, name="operating_data_rate_mt_s")
         self.model_data_rate_mt_s = CSRConstant(1800, name="model_data_rate_mt_s")
-        self.experimental_overclock = CSRConstant(1, name="experimental_overclock")
+        self.experimental_overclock = CSRConstant(0, name="experimental_overclock")
 
         self.control_bus = csr_bus.Interface(data_width=32, address_width=14)
         self.sw_ready = Signal(2, name="hbm_sw_ready")

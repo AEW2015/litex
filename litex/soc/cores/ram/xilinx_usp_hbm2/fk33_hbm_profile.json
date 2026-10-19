@@ -1,8 +1,8 @@
 {
   "schema": 1,
-  "name": "fk33-ref200-hbm1000-wolf-experimental",
+  "name": "fk33-ref200-hbm900-destructive-runtime",
   "reference_mhz": 200,
-  "hbm_mhz": 1000,
+  "hbm_mhz": 900,
   "stacks": 2,
   "regions_per_stack": 8,
   "region_stride": 131072,
@@ -32,6 +32,10 @@
     {
       "path": "builds/fk33-litex-hbm-baseline/ip/hbm/hdl/hbm_v1_0_vl_rfs.sv",
       "sha256": "cb56702d5da20e61b7a178637fdaf221f5f7c13ce7d3840f92c36acdfe80e643"
+    },
+    {
+      "path": "C:/Xilinx/2025.2/Vivado/data/ip/xilinx/hbm_v1_0/xgui/hbm_v1_0.tcl",
+      "sha256": "a679d8483589e2dc8de6148ad986df8636b11f9099baaeb730f904c432eed6f8"
     }
   ],
   "ms_pre": [
@@ -83,15 +87,15 @@
   "pll": [
     {
       "address": 2097152,
-      "value": 42242
+      "value": 42114
     },
     {
       "address": 2097156,
-      "value": 41728
+      "value": 38400
     },
     {
       "address": 2097160,
-      "value": 5654
+      "value": 5140
     },
     {
       "address": 2097164,
@@ -281,7 +285,7 @@
     },
     {
       "address": 1065164,
-      "value": 3900
+      "value": 3510
     },
     {
       "address": 1064968,
@@ -382,9 +386,32 @@
     "Static extraction of reviewed cold reference register values only; no XCI/ROM dependency at runtime.",
     "PHY06 is deliberately not written; initial value is recorded and verified unchanged after initialization. No 12mA/15mA override is imposed.",
     "MC_MAP labels are metadata only, never applied to APB region addresses.",
-    "Experimental 200MHz reference / 1000MHz HBM (2000MT/s); Wolf PLL A502/A300/1616. Other thirteen PLL words unchanged, including LOCK_CNT=1000.",
-    "FPGA HBM controller overclock: supported primitive tool model and DS923 controller limit are 1800MT/s. PL timing reports do not qualify operation at 2000MT/s.",
-    "Minimum controller delays rounded up from baseline nanoseconds; REF_PER=3900 for 3.9us. RL/WL and PHY mode registers unchanged as a matched pair.",
-    "Single WTR_L write; earlier duplicate removed following Wolf clarification. No runtime or data-retention support."
-  ]
+    "200MHz reference; default900MHz HBM, destructive800/900MHz software profiles only. Each change requires idle traffic, BLOCK, complete reset/retraining/calibration, then READY. Memory contents are discarded.",
+    "PLL frequency = reference_MHz * FBDIV / CLKOUTDIV / 2. All sixteen PLL registers must be rewritten; the other thirteen words, including LOCK_CNT=1000, remain unchanged.",
+    "The 1800MT/s primitive model covers the maximum900MHz operational profile; no overclock or data-retention qualification is claimed.",
+    "Keep conservative minimum timing cycle counts from the reviewed1000MHz table at both lower clocks. REF_PER is floor(3.9*HBM_MHz), preserving at most3.9us. RL/WL and PHY mode registers remain a matched pair.",
+    "Before clock writes, optional CAL_READ_PERIOD, IDLE_SELF_REFRESH, IDLE_POWER_DOWN and BURST_REFRESH_HOLDOFF must be disabled. Profiles do not enable automatic interval modes.",
+    "Single WTR_L write; earlier duplicate removed following Wolf clarification. LOCK_CNT is configuration, not a readable PLL-lock readiness indication; use bounded DFI initialization and calibration checks."
+  ],
+  "destructive_clock_profiles": {
+    "800": {
+      "pll_words": [
+        41986,
+        25344,
+        4626
+      ],
+      "refresh_period_cycles": 3120,
+      "provenance": "AMD hbm_v1_0.tcl: FBDIV=16, CLKOUTDIV=2, CP=3, RES=6, LOCK_FB_DLY=LOCK_REF_DLY=18; REF_PER=int(3.9*800)."
+    },
+    "900": {
+      "pll_words": [
+        42114,
+        38400,
+        5140
+      ],
+      "refresh_period_cycles": 3510,
+      "provenance": "Wolf memtweak3.c WritePLLRegs 900MHz case agrees with AMD: FBDIV=18, CLKOUTDIV=2, CP=6, RES=9, LOCK_FB_DLY=LOCK_REF_DLY=20; REF_PER=int(3.9*900)."
+    }
+  },
+  "retentive_supported": false
 }
