@@ -32,8 +32,10 @@ class GW5APLL(LiteXModule):
         self.vcxo_freq  = None
         self.nclkouts   = 0
         self.clkouts    = {}
+        self.clkout_cds = {}
         self.config     = {}
         self.params     = {}
+        self.dpa_clkout = None
         self.primitive      = self.get_primitive(devicename)
         self.vco_freq_range = self.get_vco_freq_range(devicename)
         self.pfd_freq_range = self.get_pfd_freq_range(devicename)
@@ -69,8 +71,9 @@ class GW5APLL(LiteXModule):
 
     def register_clkin(self, clkin, freq):
         check_freq_positive(freq, "Input clock frequency")
-        self.clkin = connect_clkin(self, clkin)
-        self.clkin_freq = freq
+        self.clkin        = connect_clkin(self, clkin)
+        self.clkin_source = clkin # Input clock (for generated clock constraints).
+        self.clkin_freq   = freq
         register_clkin_log(self.logger, clkin, freq)
 
     def create_clkout(self, cd, freq, phase=0, margin=1e-2, with_reset=True):
@@ -79,10 +82,25 @@ class GW5APLL(LiteXModule):
         check_clkout_cd_unused(self, cd)
         check_clkout_count(self.nclkouts, self.nclkouts_max)
         clkout = Signal()
-        self.clkouts[self.nclkouts] = ClkOut(clkout, freq, phase, margin)
+        self.clkouts[self.nclkouts]    = ClkOut(clkout, freq, phase, margin)
+        self.clkout_cds[self.nclkouts] = cd
         connect_clkout(self, cd, clkout, reset=~self.locked, with_reset=with_reset)
         create_clkout_log(self.logger, cd.name, freq, margin, self.nclkouts)
         self.nclkouts += 1
+
+    def add_generated_clock_constraints(self, platform):
+        """Declare the output clocks as generated clocks (on the PLL output pins) from the input
+        clock, so they can be referred to in timing constraints (ex: false paths). The PLL must be
+        named (``name``) and its input clock period constrained."""
+        if not self.name:
+            raise ValueError("GW5APLL generated clock constraints require a PLL name.")
+        config = self.compute_config()
+        for n, cd in self.clkout_cds.items():
+            platform.add_generated_clock_constraint(cd.clk, self.clkin_source,
+                divide_by   = config["idiv"]*config[f"odiv{n}"],
+                multiply_by = config["fdiv"]*config["mdiv"],
+                pin         = f"{self.name}/CLKOUT{n}",
+            )
 
     def compute_config(self):
         check_clkin_registered(hasattr(self, "clkin"))
@@ -136,6 +154,24 @@ class GW5APLL(LiteXModule):
             best_config, best_score = update_best_config(best_config, best_score, config, errors, config["vco"])
 
         return best_config
+
+    def expose_dpa(self, clkout=0):
+        """Expose dynamic phase adjustment for one previously created output.
+
+        A falling edge of phase_step shifts the output by 1/(8*VCO):
+        phase_dir=0 delays it, phase_dir=1 advances it (Gowin UG306).
+        Keep the channel fixed: changing PSSEL resets its dynamic phase.
+        """
+        if clkout not in self.clkouts:
+            raise ValueError("DPA requires an existing clock output.")
+        if self.clkouts[clkout].phase != 0:
+            raise ValueError("DPA starts at zero phase; static phase must be zero.")
+        if self.dpa_clkout is not None:
+            raise ValueError("DPA is already exposed.")
+        self.dpa_clkout = clkout
+        self.clkouts[clkout].clk.attr.add(("syn_keep", 1))
+        self.phase_dir  = Signal()
+        self.phase_step = Signal()
 
     def do_finalize(self):
         check_clkin_registered(hasattr(self, "clkin"))
@@ -306,5 +342,14 @@ class GW5APLL(LiteXModule):
             self.params["p_ODIV%d_SEL" % i] = config["odiv%d" % i]
             self.params["p_CLKOUT%d_PE_COARSE" % i] = config["pe%d" % i]
             self.params["p_CLKOUT%d_PE_FINE" % i] = config["pe%d_fine" % i]
+
+        if self.dpa_clkout is not None:
+            self.params.update(
+                p_DYN_DPA_EN = "TRUE",
+                i_PSDIR     = self.phase_dir,
+                i_PSSEL     = Constant(self.dpa_clkout, 3),
+                i_PSPULSE   = self.phase_step,
+            )
+            self.params[f"p_DYN_PE{self.dpa_clkout}_SEL"] = "TRUE"
 
         self.specials += Instance(self.primitive, name=self.name or "", **self.params)
