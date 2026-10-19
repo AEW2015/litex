@@ -38,7 +38,12 @@ setup(
     packages                       = find_packages(exclude=("test*", "sim*", "doc*")),
     include_package_data           = True,
     package_data                   = {
-        'litex.soc.doc': ['static/*']
+        'litex.soc.doc': ['static/*'],
+        'litex.soc.cores.ram': [
+            'xilinx_usp_hbm2/*.sv',
+            'xilinx_usp_hbm2/*.json',
+            'xilinx_usp_hbm2/hbm_init.py',
+        ]
     },
     platforms                      = ["Any"],
     keywords                       = "HDL ASIC FPGA hardware design",

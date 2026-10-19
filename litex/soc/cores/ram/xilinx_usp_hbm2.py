@@ -255,12 +255,13 @@ class PrimitiveHBM2(USPHBM2):
     ``control_bus`` is a raw 32-bit, 14-bit word-addressed CSR interface. It
     must be connected to the SoC's CSR interconnect without a second CSR bank
     decoder: the control RTL already selects bank 6 and registers responses.
-    ``rtl_dir`` must contain fk33_hbm_primitive.sv and fk33_hbm_control.sv.
+    The bundled RTL is used by default; ``rtl_dir`` may override it with a
+    directory containing fk33_hbm_primitive.sv and fk33_hbm_control.sv.
     The fixed FK33 profile requires software initialization before READY.
     Withdrawing READY resets AXI interfaces; retention is not qualified.
     """
 
-    def __init__(self, platform, hbm_ip_name="hbm_0", *, rtl_dir,
+    def __init__(self, platform, hbm_ip_name="hbm_0", *, rtl_dir=None,
                  stacks=2, hbm_clk_freq=900e6, axi_clk_freq=250e6,
                  ref_clk_freq=100e6, apb_clk_freq=100e6):
         expected = {
@@ -275,7 +276,8 @@ class PrimitiveHBM2(USPHBM2):
                 raise ValueError(f"FK33 primitive profile requires {name}={required!r}")
         if hbm_ip_name != "hbm_0":
             raise ValueError("The tested primitive RTL module is named hbm_0")
-        self.rtl_dir = Path(rtl_dir).resolve()
+        self.rtl_dir = (Path(rtl_dir).resolve() if rtl_dir is not None
+                        else Path(__file__).resolve().with_suffix(""))
         self.rtl_sources = tuple(self.rtl_dir / name for name in (
             "fk33_hbm_primitive.sv", "fk33_hbm_control.sv"))
         for path in self.rtl_sources:

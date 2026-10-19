@@ -1,0 +1,392 @@
+{
+  "schema": 1,
+  "name": "fk33-ref100-hbm900-wolf",
+  "reference_mhz": 100,
+  "hbm_mhz": 900,
+  "stacks": 2,
+  "regions_per_stack": 8,
+  "region_stride": 131072,
+  "physical_label_by_region": [
+    0,
+    1,
+    4,
+    5,
+    2,
+    3,
+    6,
+    7
+  ],
+  "sources": [
+    {
+      "path": "builds/fk33-litex-hbm-baseline/ip/hbm/hdl/rtl/xpm_internal_config_file_0.mem",
+      "sha256": "c2fb1b5c240dfd5e25c147aedd9789d5ace4b4ea794520611be382353dc9235e"
+    },
+    {
+      "path": "references/discord/wolf9466/attachments/1357780082873335928/memtweak3.c",
+      "sha256": "6800edee839f5a3721f004603b4eea40b75d2eb9a1664fc95576027e05c63284"
+    },
+    {
+      "path": "references/discord/wolf9466/attachments/1357780143707389952/wolf-xilinxhbm.h",
+      "sha256": "07378197d08e502e57da9a394d1d36cef116afd8d4f44da05ad623ca92dfe524"
+    },
+    {
+      "path": "builds/fk33-litex-hbm-baseline/ip/hbm/hdl/hbm_v1_0_vl_rfs.sv",
+      "sha256": "cb56702d5da20e61b7a178637fdaf221f5f7c13ce7d3840f92c36acdfe80e643"
+    }
+  ],
+  "ms_pre": [
+    {
+      "address": 2359536,
+      "value": 67
+    },
+    {
+      "address": 2359488,
+      "value": 975
+    },
+    {
+      "address": 2359492,
+      "value": 975
+    },
+    {
+      "address": 2359496,
+      "value": 975
+    },
+    {
+      "address": 2359500,
+      "value": 975
+    },
+    {
+      "address": 2359428,
+      "value": 9248
+    },
+    {
+      "address": 2359436,
+      "value": 2860
+    },
+    {
+      "address": 2359476,
+      "value": 3900
+    },
+    {
+      "address": 2359548,
+      "value": 16903
+    },
+    {
+      "address": 2359528,
+      "value": 8194
+    },
+    {
+      "address": 2359464,
+      "value": 7
+    }
+  ],
+  "pll": [
+    {
+      "address": 2097152,
+      "value": 43266
+    },
+    {
+      "address": 2097156,
+      "value": 42496
+    },
+    {
+      "address": 2097160,
+      "value": 7967
+    },
+    {
+      "address": 2097164,
+      "value": 33768
+    },
+    {
+      "address": 2097168,
+      "value": 41121
+    },
+    {
+      "address": 2097172,
+      "value": 31
+    },
+    {
+      "address": 2097176,
+      "value": 34
+    },
+    {
+      "address": 2097180,
+      "value": 1767
+    },
+    {
+      "address": 2097184,
+      "value": 62332
+    },
+    {
+      "address": 2097188,
+      "value": 31821
+    },
+    {
+      "address": 2097192,
+      "value": 53314
+    },
+    {
+      "address": 2097196,
+      "value": 60376
+    },
+    {
+      "address": 2097200,
+      "value": 60511
+    },
+    {
+      "address": 2097204,
+      "value": 60923
+    },
+    {
+      "address": 2097208,
+      "value": 43725
+    },
+    {
+      "address": 2097212,
+      "value": 17448
+    }
+  ],
+  "ms_post": [
+    {
+      "address": 2359296,
+      "value": 823373808
+    },
+    {
+      "address": 2359296,
+      "value": 823341040
+    },
+    {
+      "address": 2359424,
+      "value": 16785622
+    }
+  ],
+  "phy": [
+    {
+      "address": 0,
+      "value": 4042523279
+    },
+    {
+      "address": 360,
+      "value": 4
+    },
+    {
+      "address": 8,
+      "value": 7079817
+    },
+    {
+      "address": 216,
+      "value": 7951
+    },
+    {
+      "address": 48,
+      "value": 3072
+    },
+    {
+      "address": 220,
+      "value": 439
+    },
+    {
+      "address": 256,
+      "value": 1792
+    },
+    {
+      "address": 336,
+      "value": 3364356096
+    },
+    {
+      "address": 348,
+      "value": 4294919736
+    }
+  ],
+  "mc": [
+    {
+      "address": 1065044,
+      "value": 43
+    },
+    {
+      "address": 1065028,
+      "value": 30
+    },
+    {
+      "address": 1064412,
+      "value": 13
+    },
+    {
+      "address": 1064416,
+      "value": 10
+    },
+    {
+      "address": 1064060,
+      "value": 6
+    },
+    {
+      "address": 1064056,
+      "value": 4
+    },
+    {
+      "address": 1065048,
+      "value": 15
+    },
+    {
+      "address": 1065056,
+      "value": 5
+    },
+    {
+      "address": 1065040,
+      "value": 13
+    },
+    {
+      "address": 1065060,
+      "value": 15
+    },
+    {
+      "address": 1064068,
+      "value": 8
+    },
+    {
+      "address": 1064064,
+      "value": 4
+    },
+    {
+      "address": 1065076,
+      "value": 7
+    },
+    {
+      "address": 1065052,
+      "value": 235
+    },
+    {
+      "address": 1064384,
+      "value": 145
+    },
+    {
+      "address": 1064380,
+      "value": 8
+    },
+    {
+      "address": 1065508,
+      "value": 7
+    },
+    {
+      "address": 1065512,
+      "value": 22
+    },
+    {
+      "address": 1064068,
+      "value": 11
+    },
+    {
+      "address": 1065168,
+      "value": 0
+    },
+    {
+      "address": 1065856,
+      "value": 1
+    },
+    {
+      "address": 1065164,
+      "value": 3510
+    },
+    {
+      "address": 1064968,
+      "value": 1
+    },
+    {
+      "address": 1064972,
+      "value": 1
+    },
+    {
+      "address": 1064096,
+      "value": 0
+    },
+    {
+      "address": 1064100,
+      "value": 0
+    },
+    {
+      "address": 1064104,
+      "value": 0
+    },
+    {
+      "address": 1124384,
+      "value": 0
+    },
+    {
+      "address": 1069056,
+      "value": 1
+    },
+    {
+      "address": 1069060,
+      "value": 1
+    },
+    {
+      "address": 1069064,
+      "value": 1
+    },
+    {
+      "address": 1069068,
+      "value": 1
+    },
+    {
+      "address": 1064116,
+      "value": 1
+    },
+    {
+      "address": 1064120,
+      "value": 0
+    },
+    {
+      "address": 1063988,
+      "value": 0
+    },
+    {
+      "address": 1071104,
+      "value": 0
+    },
+    {
+      "address": 1064008,
+      "value": 1
+    },
+    {
+      "address": 1064112,
+      "value": 0
+    },
+    {
+      "address": 1070080,
+      "value": 1
+    },
+    {
+      "address": 1070084,
+      "value": 0
+    },
+    {
+      "address": 1071108,
+      "value": 0
+    },
+    {
+      "address": 1071112,
+      "value": 0
+    },
+    {
+      "address": 1071116,
+      "value": 0
+    }
+  ],
+  "calibration_status_mask": 3221225472,
+  "calibration_status_expected": 3221225472,
+  "calibration_result_mask": 3221225472,
+  "calibration_result_expected": 2147483648,
+  "selectors": [
+    36608,
+    102144,
+    167680,
+    233216
+  ],
+  "notes": [
+    "Static extraction of reviewed cold reference register values only; no XCI/ROM dependency at runtime.",
+    "PHY06 is deliberately not written; initial value is recorded and verified unchanged after initialization. No 12mA/15mA override is imposed.",
+    "MC_MAP labels are metadata only, never applied to APB region addresses.",
+    "The 43-write MC table intentionally repeats WTR_L (8 then 11), matching Wolf/reference.",
+    "PLL settings A902/A600/1F1F belong to 100MHz reference, 900MHz HBM; no runtime clock choices."
+  ]
+}
