@@ -383,6 +383,7 @@
     "PHY06 is deliberately not written; initial value is recorded and verified unchanged after initialization. No 12mA/15mA override is imposed.",
     "MC_MAP labels are metadata only, never applied to APB region addresses.",
     "Experimental 200MHz reference / 1000MHz HBM (2000MT/s); Wolf PLL A502/A300/1616. Other thirteen PLL words unchanged, including LOCK_CNT=1000.",
+    "FPGA HBM controller overclock: supported primitive tool model and DS923 controller limit are 1800MT/s. PL timing reports do not qualify operation at 2000MT/s.",
     "Minimum controller delays rounded up from baseline nanoseconds; REF_PER=3900 for 3.9us. RL/WL and PHY mode registers unchanged as a matched pair.",
     "Single WTR_L write; earlier duplicate removed following Wolf clarification. No runtime or data-retention support."
   ]
