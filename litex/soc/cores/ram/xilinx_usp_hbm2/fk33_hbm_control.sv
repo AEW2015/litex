@@ -31,6 +31,11 @@ module fk33_hbm_control #(
     // Celsius values must come from the software APB temperature sequence.
     (* ASYNC_REG="TRUE" *) reg [2:0] raw_temperature_0_sync_0, raw_temperature_0_sync_1;
     (* ASYNC_REG="TRUE" *) reg [2:0] raw_temperature_1_sync_0, raw_temperature_1_sync_1;
+    // HBM status outputs launch on PCLK. Capture beside the SYS sampling
+    // chain so the fixed hard-macro location is not a short APB-to-SYS path.
+    // The primitive's direct asynchronous CATTRIP traffic gate is unchanged.
+    reg [1:0] trip_apb;
+    reg [2:0] raw_temperature_0_apb, raw_temperature_1_apb;
     reg [21:0] address;
     reg [31:0] write_data;
     // Either reset aborts the entire mailbox; independently synchronized release
@@ -71,6 +76,18 @@ module fk33_hbm_control #(
     reg [31:0] transfer_data;
     reg transfer_write, transfer_stack;
     reg [31:0] timeout_count;
+
+    always @(posedge apb_clk or posedge reset_all) begin
+        if (reset_all) begin
+            trip_apb <= 0;
+            raw_temperature_0_apb <= 0;
+            raw_temperature_1_apb <= 0;
+        end else begin
+            trip_apb <= trip;
+            raw_temperature_0_apb <= raw_temp_0;
+            raw_temperature_1_apb <= raw_temp_1;
+        end
+    end
 
     assign paddr = transfer_address;
     assign pwdata = transfer_data;
@@ -116,10 +133,10 @@ module fk33_hbm_control #(
             sw_ready<=0; sw_temperature_0<=0; sw_temperature_1<=0;
             sw_temperature_valid<=0; temp_age_0<=0; temp_age_1<=0;
         end else begin
-            raw_temperature_0_sync_0<=raw_temp_0; raw_temperature_0_sync_1<=raw_temperature_0_sync_0;
-            raw_temperature_1_sync_0<=raw_temp_1; raw_temperature_1_sync_1<=raw_temperature_1_sync_0;
+            raw_temperature_0_sync_0<=raw_temperature_0_apb; raw_temperature_0_sync_1<=raw_temperature_0_sync_0;
+            raw_temperature_1_sync_0<=raw_temperature_1_apb; raw_temperature_1_sync_1<=raw_temperature_1_sync_0;
             response_sync_0<=response_toggle; response_sync_1<=response_sync_0;
-            trip_sync_0<=trip; trip_sync_1<=trip_sync_0;
+            trip_sync_0<=trip_apb; trip_sync_1<=trip_sync_0;
             if (sw_temperature_valid[0]) begin
                 if (temp_age_0 >= TEMPERATURE_MAX_AGE) begin
                     sw_temperature_valid[0]<=0; sw_ready<=0;
