@@ -356,7 +356,11 @@ class PrimitiveHBM2(USPHBM2):
 
         # Reuse the upstream public AXI and init_done interfaces. Its source
         # loader is overridden below, so no XCI path is read or generated.
-        super().__init__(platform, hbm_ip_name=hbm_ip_name)
+        super().__init__(platform, hbm_ip_name=hbm_ip_name,
+                         stacks=stacks, hbm_clk_freq=hbm_clk_freq,
+                         axi_clk_freq=axi_clk_freq, ref_clk_freq=ref_clk_freq,
+                         apb_clk_freq=apb_clk_freq, generate_ip=False,
+                         xci_path=None, ip_config={})
 
         self.control_bus = csr_bus.Interface(data_width=32, address_width=14)
         self.sw_ready = Signal(2, name="hbm_sw_ready")
