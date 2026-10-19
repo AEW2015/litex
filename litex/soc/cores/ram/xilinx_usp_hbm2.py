@@ -6,8 +6,10 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
 import os
+from pathlib import Path
 
 from migen import *
+from migen.genlib.cdc import MultiReg
 
 from litex.gen import *
 
@@ -16,6 +18,7 @@ from litex.soc.integration.soc import SoCRegion
 from litex.soc.integration.builder import *
 from litex.soc.interconnect.axi import *
 from litex.soc.interconnect.csr import *
+from litex.soc.interconnect import csr_bus
 
 # HBM2 Pseudo-Channel Helpers ----------------------------------------------------------------------
 
@@ -224,3 +227,136 @@ class USPHBM2(LiteXModule):
     def do_finalize(self):
         self.add_sources(self.platform)
         self.specials += Instance(self.hbm_name, **self.hbm_params)
+
+
+# Fixed-profile Primitive HBM2 Wrapper ---------------------------------------------------------------
+
+MANAGEMENT_BASE = 0x3000
+MANAGEMENT_REGISTERS = (
+    ("identity", "ro"),
+    ("version", "ro"),
+    ("address", "rw"),
+    ("write_data", "rw"),
+    ("command", "wo"),
+    ("status", "ro"),
+    ("read_data", "ro"),
+    ("last_address", "ro"),
+    ("temperature0", "rw"),
+    ("temperature1", "rw"),
+    ("raw_temperature", "ro"),
+    ("inject_timeout", "wo"),
+)
+
+
+class PrimitiveHBM2(USPHBM2):
+    """Bind the maintained primitive/control RTL to LiteX interfaces.
+
+    The target maps the ``axi`` clock domain to its 250 MHz system domain.
+    ``control_bus`` is a raw 32-bit, 14-bit word-addressed CSR interface. It
+    must be connected to the SoC's CSR interconnect without a second CSR bank
+    decoder: the control RTL already selects bank 6 and registers responses.
+    ``rtl_dir`` must contain fk33_hbm_primitive.sv and fk33_hbm_control.sv.
+    The fixed FK33 profile requires software initialization before READY.
+    Withdrawing READY resets AXI interfaces; retention is not qualified.
+    """
+
+    def __init__(self, platform, hbm_ip_name="hbm_0", *, rtl_dir,
+                 stacks=2, hbm_clk_freq=900e6, axi_clk_freq=250e6,
+                 ref_clk_freq=100e6, apb_clk_freq=100e6):
+        expected = {
+            "stacks": (stacks, 2),
+            "hbm_clk_freq": (hbm_clk_freq, 900e6),
+            "axi_clk_freq": (axi_clk_freq, 250e6),
+            "ref_clk_freq": (ref_clk_freq, 100e6),
+            "apb_clk_freq": (apb_clk_freq, 100e6),
+        }
+        for name, (actual, required) in expected.items():
+            if actual != required:
+                raise ValueError(f"FK33 primitive profile requires {name}={required!r}")
+        if hbm_ip_name != "hbm_0":
+            raise ValueError("The tested primitive RTL module is named hbm_0")
+        self.rtl_dir = Path(rtl_dir).resolve()
+        self.rtl_sources = tuple(self.rtl_dir / name for name in (
+            "fk33_hbm_primitive.sv", "fk33_hbm_control.sv"))
+        for path in self.rtl_sources:
+            if not path.is_file():
+                raise FileNotFoundError(path)
+
+        # Reuse the upstream public AXI and init_done interfaces. Its source
+        # loader is overridden below, so no XCI path is read or generated.
+        super().__init__(platform, hbm_ip_name=hbm_ip_name)
+
+        self.control_bus = csr_bus.Interface(data_width=32, address_width=14)
+        self.sw_ready = Signal(2, name="hbm_sw_ready")
+        self.memory_ready = Signal(name="hbm_memory_ready")
+        self.comb += self.memory_ready.eq(self.sw_ready == 3)
+        self.sw_temperature = [Signal(7, name=f"hbm_sw_temperature_{i}") for i in range(2)]
+        self.sw_temperature_valid = Signal(2, name="hbm_sw_temperature_valid")
+        self.raw_temperature = [Signal(3, name=f"hbm_raw_temperature_{i}") for i in range(2)]
+        self.raw_cattrip = Signal(2, name="hbm_raw_cattrip")
+
+        # All application AXI interfaces retain their own domain reset.
+        for channel in range(32):
+            self.hbm_params[f"i_AXI_{channel:02d}_ARESET_N"] = ~ResetSignal("axi")
+
+        # The two stack ports share master address/data/control but have
+        # separate selects and complete 32-bit return buses.
+        address = Signal(22, name="hbm_apb_address")
+        write_data = Signal(32, name="hbm_apb_write_data")
+        write = Signal(name="hbm_apb_write")
+        enable = Signal(name="hbm_apb_enable")
+        select = Signal(2, name="hbm_apb_select")
+        for stack in range(2):
+            apb = Record([
+                ("paddr", 22), ("pwdata", 32), ("pwrite", 1),
+                ("psel", 1), ("penable", 1), ("prdata", 32),
+                ("pready", 1), ("pslverr", 1),
+            ], name=f"hbm_apb{stack}")
+            self.apb.append(apb)
+            self.comb += [apb.paddr.eq(address), apb.pwdata.eq(write_data),
+                          apb.pwrite.eq(write), apb.penable.eq(enable),
+                          apb.psel.eq(select[stack])]
+            for port in ("paddr", "pwdata", "pwrite", "psel", "penable"):
+                self.hbm_params[f"i_APB_{stack}_{port.upper()}"] = getattr(apb, port)
+            for port in ("prdata", "pready", "pslverr"):
+                self.hbm_params[f"o_APB_{stack}_{port.upper()}"] = getattr(apb, port)
+
+            self.hbm_params[f"o_raw_temperature_{stack}"] = self.raw_temperature[stack]
+            self.hbm_params[f"i_sw_temperature_{stack}"] = self.sw_temperature[stack]
+            self.hbm_params[f"o_DRAM_{stack}_STAT_CATTRIP"] = self.raw_cattrip[stack]
+
+            # Preserve the reference's software-visible status names and
+            # two-stage sampling. These Celsius values are compatibility
+            # shadows from software, not decoded three-bit primitive codes.
+            raw_celsius = Signal(7, name=f"hbm_stack{stack}_celsius_shadow")
+            self.hbm_params[f"o_DRAM_{stack}_STAT_TEMP"] = raw_celsius
+            for suffix, width, value in (
+                ("temperature", 7, raw_celsius),
+                ("cattrip", 1, self.raw_cattrip[stack]),
+            ):
+                name = f"stack{stack}_{suffix}"
+                status = CSRStatus(width, name=name, description=f"HBM stack {stack} {suffix}.")
+                setattr(self, name, status)
+                self.specials += MultiReg(value, status.status, "sys")
+
+        self.hbm_params["i_sw_ready"] = self.sw_ready
+        self.hbm_params["i_sw_temperature_valid"] = self.sw_temperature_valid
+        self.specials += Instance("fk33_hbm_control",
+            i_sys_clk=ClockSignal("sys"), i_sys_rst=ResetSignal("sys"),
+            i_apb_clk=ClockSignal("apb"), i_apb_rst=ResetSignal("apb"),
+            i_csr_adr=self.control_bus.adr, i_csr_dat_w=self.control_bus.dat_w,
+            i_csr_we=self.control_bus.we, o_csr_dat_r=self.control_bus.dat_r,
+            i_trip=self.raw_cattrip,
+            i_raw_temp_0=self.raw_temperature[0], i_raw_temp_1=self.raw_temperature[1],
+            o_sw_ready=self.sw_ready,
+            o_sw_temperature_0=self.sw_temperature[0], o_sw_temperature_1=self.sw_temperature[1],
+            o_sw_temperature_valid=self.sw_temperature_valid,
+            o_paddr=address, o_pwdata=write_data, o_pwrite=write,
+            o_psel=select, o_penable=enable,
+            i_prdata_0=self.apb[0].prdata, i_prdata_1=self.apb[1].prdata,
+            i_pready=Cat(self.apb[0].pready, self.apb[1].pready),
+            i_pslverr=Cat(self.apb[0].pslverr, self.apb[1].pslverr))
+
+    def add_sources(self, platform):
+        for source in self.rtl_sources:
+            platform.add_source(str(source), language="systemverilog")
