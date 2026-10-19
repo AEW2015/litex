@@ -1,8 +1,8 @@
 {
   "schema": 1,
-  "name": "fk33-ref100-hbm900-wolf",
-  "reference_mhz": 100,
-  "hbm_mhz": 900,
+  "name": "fk33-ref200-hbm1000-wolf-experimental",
+  "reference_mhz": 200,
+  "hbm_mhz": 1000,
   "stacks": 2,
   "regions_per_stack": 8,
   "region_stride": 131072,
@@ -83,15 +83,15 @@
   "pll": [
     {
       "address": 2097152,
-      "value": 43266
+      "value": 42242
     },
     {
       "address": 2097156,
-      "value": 42496
+      "value": 41728
     },
     {
       "address": 2097160,
-      "value": 7967
+      "value": 5654
     },
     {
       "address": 2097164,
@@ -201,67 +201,63 @@
   "mc": [
     {
       "address": 1065044,
-      "value": 43
+      "value": 48
     },
     {
       "address": 1065028,
-      "value": 30
+      "value": 34
     },
     {
       "address": 1064412,
-      "value": 13
+      "value": 15
     },
     {
       "address": 1064416,
-      "value": 10
+      "value": 12
     },
     {
       "address": 1064060,
-      "value": 6
-    },
-    {
-      "address": 1064056,
-      "value": 4
-    },
-    {
-      "address": 1065048,
-      "value": 15
-    },
-    {
-      "address": 1065056,
-      "value": 5
-    },
-    {
-      "address": 1065040,
-      "value": 13
-    },
-    {
-      "address": 1065060,
-      "value": 15
-    },
-    {
-      "address": 1064068,
-      "value": 8
-    },
-    {
-      "address": 1064064,
-      "value": 4
-    },
-    {
-      "address": 1065076,
       "value": 7
     },
     {
+      "address": 1064056,
+      "value": 5
+    },
+    {
+      "address": 1065048,
+      "value": 17
+    },
+    {
+      "address": 1065056,
+      "value": 6
+    },
+    {
+      "address": 1065040,
+      "value": 15
+    },
+    {
+      "address": 1065060,
+      "value": 17
+    },
+    {
+      "address": 1064064,
+      "value": 5
+    },
+    {
+      "address": 1065076,
+      "value": 8
+    },
+    {
       "address": 1065052,
-      "value": 235
+      "value": 262
     },
     {
       "address": 1064384,
-      "value": 145
+      "value": 162
     },
     {
       "address": 1064380,
-      "value": 8
+      "value": 9
     },
     {
       "address": 1065508,
@@ -273,7 +269,7 @@
     },
     {
       "address": 1064068,
-      "value": 11
+      "value": 13
     },
     {
       "address": 1065168,
@@ -285,7 +281,7 @@
     },
     {
       "address": 1065164,
-      "value": 3510
+      "value": 3900
     },
     {
       "address": 1064968,
@@ -386,7 +382,8 @@
     "Static extraction of reviewed cold reference register values only; no XCI/ROM dependency at runtime.",
     "PHY06 is deliberately not written; initial value is recorded and verified unchanged after initialization. No 12mA/15mA override is imposed.",
     "MC_MAP labels are metadata only, never applied to APB region addresses.",
-    "The 43-write MC table intentionally repeats WTR_L (8 then 11), matching Wolf/reference.",
-    "PLL settings A902/A600/1F1F belong to 100MHz reference, 900MHz HBM; no runtime clock choices."
+    "Experimental 200MHz reference / 1000MHz HBM (2000MT/s); Wolf PLL A502/A300/1616. Other thirteen PLL words unchanged, including LOCK_CNT=1000.",
+    "Minimum controller delays rounded up from baseline nanoseconds; REF_PER=3900 for 3.9us. RL/WL and PHY mode registers unchanged as a matched pair.",
+    "Single WTR_L write; earlier duplicate removed following Wolf clarification. No runtime or data-retention support."
   ]
 }

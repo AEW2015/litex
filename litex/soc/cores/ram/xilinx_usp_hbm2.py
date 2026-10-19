@@ -332,13 +332,13 @@ class PrimitiveHBM2(USPHBM2):
     """
 
     def __init__(self, platform, hbm_ip_name="hbm_0", *, rtl_dir=None,
-                 stacks=2, hbm_clk_freq=900e6, axi_clk_freq=250e6,
-                 ref_clk_freq=100e6, apb_clk_freq=100e6):
+                 stacks=2, hbm_clk_freq=1000e6, axi_clk_freq=250e6,
+                 ref_clk_freq=200e6, apb_clk_freq=100e6):
         expected = {
             "stacks": (stacks, 2),
-            "hbm_clk_freq": (hbm_clk_freq, 900e6),
+            "hbm_clk_freq": (hbm_clk_freq, 1000e6),
             "axi_clk_freq": (axi_clk_freq, 250e6),
-            "ref_clk_freq": (ref_clk_freq, 100e6),
+            "ref_clk_freq": (ref_clk_freq, 200e6),
             "apb_clk_freq": (apb_clk_freq, 100e6),
         }
         for name, (actual, required) in expected.items():

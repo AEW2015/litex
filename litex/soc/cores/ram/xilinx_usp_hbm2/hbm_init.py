@@ -46,9 +46,9 @@ class ColdInitializer:
             raise ValueError("Poll deadline must be positive")
         self.step = "not_started"
         p = self.profile
-        if (p['reference_mhz'], p['hbm_mhz'], p['stacks'], p['regions_per_stack']) != (100, 900, 2, 8):
-            raise InitError("Only reviewed FK33 100/900 MHz two-stack profile is supported")
-        for key, count in [('ms_pre', 11), ('pll', 16), ('ms_post', 3), ('phy', 9), ('mc', 43)]:
+        if (p['reference_mhz'], p['hbm_mhz'], p['stacks'], p['regions_per_stack']) != (200, 1000, 2, 8):
+            raise InitError("Only reviewed FK33 200/1000 MHz two-stack profile is supported")
+        for key, count in [('ms_pre', 11), ('pll', 16), ('ms_post', 3), ('phy', 9), ('mc', 42)]:
             if len(p[key]) != count:
                 raise InitError(f"Incomplete {key} register table")
         if any(x['address'] == 0x18 for x in p['phy']):
