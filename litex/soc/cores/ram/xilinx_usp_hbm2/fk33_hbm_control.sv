@@ -44,12 +44,17 @@ module fk33_hbm_control #(
     wire reset_all = sys_rst | apb_rst;
     wire apb_abort_reset = reset_all | mailbox_fault;
     (* ASYNC_REG="TRUE" *) reg [1:0] sys_reset_sync, apb_reset_sync;
+    // Diagnostic sampling is reset by either domain reset, never mailbox_fault.
+    (* ASYNC_REG="TRUE" *) reg [1:0] apb_monitor_reset_sync;
     always @(posedge sys_clk or posedge reset_all)
         if (reset_all) sys_reset_sync <= 2'b11;
         else sys_reset_sync <= {sys_reset_sync[0],1'b0};
     always @(posedge apb_clk or posedge apb_abort_reset)
         if (apb_abort_reset) apb_reset_sync <= 2'b11;
         else apb_reset_sync <= {apb_reset_sync[0],1'b0};
+    always @(posedge apb_clk or posedge reset_all)
+        if (reset_all) apb_monitor_reset_sync <= 2'b11;
+        else apb_monitor_reset_sync <= {apb_monitor_reset_sync[0],1'b0};
     reg request_toggle, busy, done, error_flag, timeout_flag;
     reg inject_armed, request_inject, transfer_inject;
     reg [31:0] sys_timeout_count;
@@ -77,8 +82,8 @@ module fk33_hbm_control #(
     reg transfer_write, transfer_stack;
     reg [31:0] timeout_count;
 
-    always @(posedge apb_clk or posedge reset_all) begin
-        if (reset_all) begin
+    always @(posedge apb_clk or posedge apb_monitor_reset_sync[1]) begin
+        if (apb_monitor_reset_sync[1]) begin
             trip_apb <= 0;
             raw_temperature_0_apb <= 0;
             raw_temperature_1_apb <= 0;
@@ -120,8 +125,8 @@ module fk33_hbm_control #(
     // drops the address before the following Wishbone response cycle.
     always @(posedge sys_clk) csr_dat_r <= csr_read_mux;
 
-    always @(posedge sys_clk or posedge reset_all) begin
-        if (reset_all || sys_reset_sync[1]) begin
+    always @(posedge sys_clk or posedge sys_reset_sync[1]) begin
+        if (sys_reset_sync[1]) begin
             raw_temperature_0_sync_0<=0; raw_temperature_0_sync_1<=0;
             raw_temperature_1_sync_0<=0; raw_temperature_1_sync_1<=0;
             address<=0; write_data<=0; request_toggle<=0; busy<=0;
@@ -211,8 +216,8 @@ module fk33_hbm_control #(
         end
     end
 
-    always @(posedge apb_clk or posedge apb_abort_reset) begin
-        if (apb_abort_reset || apb_reset_sync[1]) begin
+    always @(posedge apb_clk or posedge apb_reset_sync[1]) begin
+        if (apb_reset_sync[1]) begin
             request_sync_0<=0; request_sync_1<=0; request_seen<=0;
             state<=0; transfer_address<=0; transfer_data<=0;
             transfer_write<=0; transfer_stack<=0; transfer_inject<=0; timeout_count<=0;
