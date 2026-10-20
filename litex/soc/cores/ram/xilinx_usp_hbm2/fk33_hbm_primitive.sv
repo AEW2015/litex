@@ -1102,7 +1102,7 @@ module hbm_0 (
 
 assign DRAM_0_STAT_TEMP = sw_temperature_valid[0] ? sw_temperature_0 : 7'h7f;
 assign DRAM_1_STAT_TEMP = sw_temperature_valid[1] ? sw_temperature_1 : 7'h7f;
-// Port 0: raw trip clamps traffic immediately, including stopped clocks.
+// Port 0: capture and permit reset assert without either clock edge.
 // APB pulse capture holds even a between-edge trip until a PCLK release.
 // Keep this capture local; the permit pair synchronizes release in ACLK.
 (* DONT_TOUCH = "TRUE" *) reg trip_hold_00 = 1'b1;
@@ -1113,7 +1113,7 @@ always @(posedge APB_0_PCLK or posedge DRAM_0_STAT_CATTRIP)
 always @(posedge AXI_00_ACLK or negedge AXI_00_ARESET_N or posedge trip_hold_00)
     if (!AXI_00_ARESET_N || trip_hold_00) permit_00 <= 2'b00;
     else permit_00 <= {permit_00[0], sw_ready[0]};
-wire enabled_00 = permit_00[1] & sw_ready[0] & ~DRAM_0_STAT_CATTRIP;
+wire enabled_00 = permit_00[1] & sw_ready[0];
 wire primitive_AXI_00_ARREADY;
 assign AXI_00_ARREADY = primitive_AXI_00_ARREADY & enabled_00;
 wire primitive_AXI_00_AWREADY;
@@ -1124,7 +1124,7 @@ wire primitive_AXI_00_RVALID;
 assign AXI_00_RVALID = primitive_AXI_00_RVALID & enabled_00;
 wire primitive_AXI_00_BVALID;
 assign AXI_00_BVALID = primitive_AXI_00_BVALID & enabled_00;
-// Port 1: raw trip clamps traffic immediately, including stopped clocks.
+// Port 1: capture and permit reset assert without either clock edge.
 // APB pulse capture holds even a between-edge trip until a PCLK release.
 // Keep this capture local; the permit pair synchronizes release in ACLK.
 (* DONT_TOUCH = "TRUE" *) reg trip_hold_01 = 1'b1;
@@ -1135,7 +1135,7 @@ always @(posedge APB_0_PCLK or posedge DRAM_0_STAT_CATTRIP)
 always @(posedge AXI_01_ACLK or negedge AXI_01_ARESET_N or posedge trip_hold_01)
     if (!AXI_01_ARESET_N || trip_hold_01) permit_01 <= 2'b00;
     else permit_01 <= {permit_01[0], sw_ready[0]};
-wire enabled_01 = permit_01[1] & sw_ready[0] & ~DRAM_0_STAT_CATTRIP;
+wire enabled_01 = permit_01[1] & sw_ready[0];
 wire primitive_AXI_01_ARREADY;
 assign AXI_01_ARREADY = primitive_AXI_01_ARREADY & enabled_01;
 wire primitive_AXI_01_AWREADY;
@@ -1146,7 +1146,7 @@ wire primitive_AXI_01_RVALID;
 assign AXI_01_RVALID = primitive_AXI_01_RVALID & enabled_01;
 wire primitive_AXI_01_BVALID;
 assign AXI_01_BVALID = primitive_AXI_01_BVALID & enabled_01;
-// Port 2: raw trip clamps traffic immediately, including stopped clocks.
+// Port 2: capture and permit reset assert without either clock edge.
 // APB pulse capture holds even a between-edge trip until a PCLK release.
 // Keep this capture local; the permit pair synchronizes release in ACLK.
 (* DONT_TOUCH = "TRUE" *) reg trip_hold_02 = 1'b1;
@@ -1157,7 +1157,7 @@ always @(posedge APB_0_PCLK or posedge DRAM_0_STAT_CATTRIP)
 always @(posedge AXI_02_ACLK or negedge AXI_02_ARESET_N or posedge trip_hold_02)
     if (!AXI_02_ARESET_N || trip_hold_02) permit_02 <= 2'b00;
     else permit_02 <= {permit_02[0], sw_ready[0]};
-wire enabled_02 = permit_02[1] & sw_ready[0] & ~DRAM_0_STAT_CATTRIP;
+wire enabled_02 = permit_02[1] & sw_ready[0];
 wire primitive_AXI_02_ARREADY;
 assign AXI_02_ARREADY = primitive_AXI_02_ARREADY & enabled_02;
 wire primitive_AXI_02_AWREADY;
@@ -1168,7 +1168,7 @@ wire primitive_AXI_02_RVALID;
 assign AXI_02_RVALID = primitive_AXI_02_RVALID & enabled_02;
 wire primitive_AXI_02_BVALID;
 assign AXI_02_BVALID = primitive_AXI_02_BVALID & enabled_02;
-// Port 3: raw trip clamps traffic immediately, including stopped clocks.
+// Port 3: capture and permit reset assert without either clock edge.
 // APB pulse capture holds even a between-edge trip until a PCLK release.
 // Keep this capture local; the permit pair synchronizes release in ACLK.
 (* DONT_TOUCH = "TRUE" *) reg trip_hold_03 = 1'b1;
@@ -1179,7 +1179,7 @@ always @(posedge APB_0_PCLK or posedge DRAM_0_STAT_CATTRIP)
 always @(posedge AXI_03_ACLK or negedge AXI_03_ARESET_N or posedge trip_hold_03)
     if (!AXI_03_ARESET_N || trip_hold_03) permit_03 <= 2'b00;
     else permit_03 <= {permit_03[0], sw_ready[0]};
-wire enabled_03 = permit_03[1] & sw_ready[0] & ~DRAM_0_STAT_CATTRIP;
+wire enabled_03 = permit_03[1] & sw_ready[0];
 wire primitive_AXI_03_ARREADY;
 assign AXI_03_ARREADY = primitive_AXI_03_ARREADY & enabled_03;
 wire primitive_AXI_03_AWREADY;
@@ -1190,7 +1190,7 @@ wire primitive_AXI_03_RVALID;
 assign AXI_03_RVALID = primitive_AXI_03_RVALID & enabled_03;
 wire primitive_AXI_03_BVALID;
 assign AXI_03_BVALID = primitive_AXI_03_BVALID & enabled_03;
-// Port 4: raw trip clamps traffic immediately, including stopped clocks.
+// Port 4: capture and permit reset assert without either clock edge.
 // APB pulse capture holds even a between-edge trip until a PCLK release.
 // Keep this capture local; the permit pair synchronizes release in ACLK.
 (* DONT_TOUCH = "TRUE" *) reg trip_hold_04 = 1'b1;
@@ -1201,7 +1201,7 @@ always @(posedge APB_0_PCLK or posedge DRAM_0_STAT_CATTRIP)
 always @(posedge AXI_04_ACLK or negedge AXI_04_ARESET_N or posedge trip_hold_04)
     if (!AXI_04_ARESET_N || trip_hold_04) permit_04 <= 2'b00;
     else permit_04 <= {permit_04[0], sw_ready[0]};
-wire enabled_04 = permit_04[1] & sw_ready[0] & ~DRAM_0_STAT_CATTRIP;
+wire enabled_04 = permit_04[1] & sw_ready[0];
 wire primitive_AXI_04_ARREADY;
 assign AXI_04_ARREADY = primitive_AXI_04_ARREADY & enabled_04;
 wire primitive_AXI_04_AWREADY;
@@ -1212,7 +1212,7 @@ wire primitive_AXI_04_RVALID;
 assign AXI_04_RVALID = primitive_AXI_04_RVALID & enabled_04;
 wire primitive_AXI_04_BVALID;
 assign AXI_04_BVALID = primitive_AXI_04_BVALID & enabled_04;
-// Port 5: raw trip clamps traffic immediately, including stopped clocks.
+// Port 5: capture and permit reset assert without either clock edge.
 // APB pulse capture holds even a between-edge trip until a PCLK release.
 // Keep this capture local; the permit pair synchronizes release in ACLK.
 (* DONT_TOUCH = "TRUE" *) reg trip_hold_05 = 1'b1;
@@ -1223,7 +1223,7 @@ always @(posedge APB_0_PCLK or posedge DRAM_0_STAT_CATTRIP)
 always @(posedge AXI_05_ACLK or negedge AXI_05_ARESET_N or posedge trip_hold_05)
     if (!AXI_05_ARESET_N || trip_hold_05) permit_05 <= 2'b00;
     else permit_05 <= {permit_05[0], sw_ready[0]};
-wire enabled_05 = permit_05[1] & sw_ready[0] & ~DRAM_0_STAT_CATTRIP;
+wire enabled_05 = permit_05[1] & sw_ready[0];
 wire primitive_AXI_05_ARREADY;
 assign AXI_05_ARREADY = primitive_AXI_05_ARREADY & enabled_05;
 wire primitive_AXI_05_AWREADY;
@@ -1234,7 +1234,7 @@ wire primitive_AXI_05_RVALID;
 assign AXI_05_RVALID = primitive_AXI_05_RVALID & enabled_05;
 wire primitive_AXI_05_BVALID;
 assign AXI_05_BVALID = primitive_AXI_05_BVALID & enabled_05;
-// Port 6: raw trip clamps traffic immediately, including stopped clocks.
+// Port 6: capture and permit reset assert without either clock edge.
 // APB pulse capture holds even a between-edge trip until a PCLK release.
 // Keep this capture local; the permit pair synchronizes release in ACLK.
 (* DONT_TOUCH = "TRUE" *) reg trip_hold_06 = 1'b1;
@@ -1245,7 +1245,7 @@ always @(posedge APB_0_PCLK or posedge DRAM_0_STAT_CATTRIP)
 always @(posedge AXI_06_ACLK or negedge AXI_06_ARESET_N or posedge trip_hold_06)
     if (!AXI_06_ARESET_N || trip_hold_06) permit_06 <= 2'b00;
     else permit_06 <= {permit_06[0], sw_ready[0]};
-wire enabled_06 = permit_06[1] & sw_ready[0] & ~DRAM_0_STAT_CATTRIP;
+wire enabled_06 = permit_06[1] & sw_ready[0];
 wire primitive_AXI_06_ARREADY;
 assign AXI_06_ARREADY = primitive_AXI_06_ARREADY & enabled_06;
 wire primitive_AXI_06_AWREADY;
@@ -1256,7 +1256,7 @@ wire primitive_AXI_06_RVALID;
 assign AXI_06_RVALID = primitive_AXI_06_RVALID & enabled_06;
 wire primitive_AXI_06_BVALID;
 assign AXI_06_BVALID = primitive_AXI_06_BVALID & enabled_06;
-// Port 7: raw trip clamps traffic immediately, including stopped clocks.
+// Port 7: capture and permit reset assert without either clock edge.
 // APB pulse capture holds even a between-edge trip until a PCLK release.
 // Keep this capture local; the permit pair synchronizes release in ACLK.
 (* DONT_TOUCH = "TRUE" *) reg trip_hold_07 = 1'b1;
@@ -1267,7 +1267,7 @@ always @(posedge APB_0_PCLK or posedge DRAM_0_STAT_CATTRIP)
 always @(posedge AXI_07_ACLK or negedge AXI_07_ARESET_N or posedge trip_hold_07)
     if (!AXI_07_ARESET_N || trip_hold_07) permit_07 <= 2'b00;
     else permit_07 <= {permit_07[0], sw_ready[0]};
-wire enabled_07 = permit_07[1] & sw_ready[0] & ~DRAM_0_STAT_CATTRIP;
+wire enabled_07 = permit_07[1] & sw_ready[0];
 wire primitive_AXI_07_ARREADY;
 assign AXI_07_ARREADY = primitive_AXI_07_ARREADY & enabled_07;
 wire primitive_AXI_07_AWREADY;
@@ -1278,7 +1278,7 @@ wire primitive_AXI_07_RVALID;
 assign AXI_07_RVALID = primitive_AXI_07_RVALID & enabled_07;
 wire primitive_AXI_07_BVALID;
 assign AXI_07_BVALID = primitive_AXI_07_BVALID & enabled_07;
-// Port 8: raw trip clamps traffic immediately, including stopped clocks.
+// Port 8: capture and permit reset assert without either clock edge.
 // APB pulse capture holds even a between-edge trip until a PCLK release.
 // Keep this capture local; the permit pair synchronizes release in ACLK.
 (* DONT_TOUCH = "TRUE" *) reg trip_hold_08 = 1'b1;
@@ -1289,7 +1289,7 @@ always @(posedge APB_0_PCLK or posedge DRAM_0_STAT_CATTRIP)
 always @(posedge AXI_08_ACLK or negedge AXI_08_ARESET_N or posedge trip_hold_08)
     if (!AXI_08_ARESET_N || trip_hold_08) permit_08 <= 2'b00;
     else permit_08 <= {permit_08[0], sw_ready[0]};
-wire enabled_08 = permit_08[1] & sw_ready[0] & ~DRAM_0_STAT_CATTRIP;
+wire enabled_08 = permit_08[1] & sw_ready[0];
 wire primitive_AXI_08_ARREADY;
 assign AXI_08_ARREADY = primitive_AXI_08_ARREADY & enabled_08;
 wire primitive_AXI_08_AWREADY;
@@ -1300,7 +1300,7 @@ wire primitive_AXI_08_RVALID;
 assign AXI_08_RVALID = primitive_AXI_08_RVALID & enabled_08;
 wire primitive_AXI_08_BVALID;
 assign AXI_08_BVALID = primitive_AXI_08_BVALID & enabled_08;
-// Port 9: raw trip clamps traffic immediately, including stopped clocks.
+// Port 9: capture and permit reset assert without either clock edge.
 // APB pulse capture holds even a between-edge trip until a PCLK release.
 // Keep this capture local; the permit pair synchronizes release in ACLK.
 (* DONT_TOUCH = "TRUE" *) reg trip_hold_09 = 1'b1;
@@ -1311,7 +1311,7 @@ always @(posedge APB_0_PCLK or posedge DRAM_0_STAT_CATTRIP)
 always @(posedge AXI_09_ACLK or negedge AXI_09_ARESET_N or posedge trip_hold_09)
     if (!AXI_09_ARESET_N || trip_hold_09) permit_09 <= 2'b00;
     else permit_09 <= {permit_09[0], sw_ready[0]};
-wire enabled_09 = permit_09[1] & sw_ready[0] & ~DRAM_0_STAT_CATTRIP;
+wire enabled_09 = permit_09[1] & sw_ready[0];
 wire primitive_AXI_09_ARREADY;
 assign AXI_09_ARREADY = primitive_AXI_09_ARREADY & enabled_09;
 wire primitive_AXI_09_AWREADY;
@@ -1322,7 +1322,7 @@ wire primitive_AXI_09_RVALID;
 assign AXI_09_RVALID = primitive_AXI_09_RVALID & enabled_09;
 wire primitive_AXI_09_BVALID;
 assign AXI_09_BVALID = primitive_AXI_09_BVALID & enabled_09;
-// Port 10: raw trip clamps traffic immediately, including stopped clocks.
+// Port 10: capture and permit reset assert without either clock edge.
 // APB pulse capture holds even a between-edge trip until a PCLK release.
 // Keep this capture local; the permit pair synchronizes release in ACLK.
 (* DONT_TOUCH = "TRUE" *) reg trip_hold_10 = 1'b1;
@@ -1333,7 +1333,7 @@ always @(posedge APB_0_PCLK or posedge DRAM_0_STAT_CATTRIP)
 always @(posedge AXI_10_ACLK or negedge AXI_10_ARESET_N or posedge trip_hold_10)
     if (!AXI_10_ARESET_N || trip_hold_10) permit_10 <= 2'b00;
     else permit_10 <= {permit_10[0], sw_ready[0]};
-wire enabled_10 = permit_10[1] & sw_ready[0] & ~DRAM_0_STAT_CATTRIP;
+wire enabled_10 = permit_10[1] & sw_ready[0];
 wire primitive_AXI_10_ARREADY;
 assign AXI_10_ARREADY = primitive_AXI_10_ARREADY & enabled_10;
 wire primitive_AXI_10_AWREADY;
@@ -1344,7 +1344,7 @@ wire primitive_AXI_10_RVALID;
 assign AXI_10_RVALID = primitive_AXI_10_RVALID & enabled_10;
 wire primitive_AXI_10_BVALID;
 assign AXI_10_BVALID = primitive_AXI_10_BVALID & enabled_10;
-// Port 11: raw trip clamps traffic immediately, including stopped clocks.
+// Port 11: capture and permit reset assert without either clock edge.
 // APB pulse capture holds even a between-edge trip until a PCLK release.
 // Keep this capture local; the permit pair synchronizes release in ACLK.
 (* DONT_TOUCH = "TRUE" *) reg trip_hold_11 = 1'b1;
@@ -1355,7 +1355,7 @@ always @(posedge APB_0_PCLK or posedge DRAM_0_STAT_CATTRIP)
 always @(posedge AXI_11_ACLK or negedge AXI_11_ARESET_N or posedge trip_hold_11)
     if (!AXI_11_ARESET_N || trip_hold_11) permit_11 <= 2'b00;
     else permit_11 <= {permit_11[0], sw_ready[0]};
-wire enabled_11 = permit_11[1] & sw_ready[0] & ~DRAM_0_STAT_CATTRIP;
+wire enabled_11 = permit_11[1] & sw_ready[0];
 wire primitive_AXI_11_ARREADY;
 assign AXI_11_ARREADY = primitive_AXI_11_ARREADY & enabled_11;
 wire primitive_AXI_11_AWREADY;
@@ -1366,7 +1366,7 @@ wire primitive_AXI_11_RVALID;
 assign AXI_11_RVALID = primitive_AXI_11_RVALID & enabled_11;
 wire primitive_AXI_11_BVALID;
 assign AXI_11_BVALID = primitive_AXI_11_BVALID & enabled_11;
-// Port 12: raw trip clamps traffic immediately, including stopped clocks.
+// Port 12: capture and permit reset assert without either clock edge.
 // APB pulse capture holds even a between-edge trip until a PCLK release.
 // Keep this capture local; the permit pair synchronizes release in ACLK.
 (* DONT_TOUCH = "TRUE" *) reg trip_hold_12 = 1'b1;
@@ -1377,7 +1377,7 @@ always @(posedge APB_0_PCLK or posedge DRAM_0_STAT_CATTRIP)
 always @(posedge AXI_12_ACLK or negedge AXI_12_ARESET_N or posedge trip_hold_12)
     if (!AXI_12_ARESET_N || trip_hold_12) permit_12 <= 2'b00;
     else permit_12 <= {permit_12[0], sw_ready[0]};
-wire enabled_12 = permit_12[1] & sw_ready[0] & ~DRAM_0_STAT_CATTRIP;
+wire enabled_12 = permit_12[1] & sw_ready[0];
 wire primitive_AXI_12_ARREADY;
 assign AXI_12_ARREADY = primitive_AXI_12_ARREADY & enabled_12;
 wire primitive_AXI_12_AWREADY;
@@ -1388,7 +1388,7 @@ wire primitive_AXI_12_RVALID;
 assign AXI_12_RVALID = primitive_AXI_12_RVALID & enabled_12;
 wire primitive_AXI_12_BVALID;
 assign AXI_12_BVALID = primitive_AXI_12_BVALID & enabled_12;
-// Port 13: raw trip clamps traffic immediately, including stopped clocks.
+// Port 13: capture and permit reset assert without either clock edge.
 // APB pulse capture holds even a between-edge trip until a PCLK release.
 // Keep this capture local; the permit pair synchronizes release in ACLK.
 (* DONT_TOUCH = "TRUE" *) reg trip_hold_13 = 1'b1;
@@ -1399,7 +1399,7 @@ always @(posedge APB_0_PCLK or posedge DRAM_0_STAT_CATTRIP)
 always @(posedge AXI_13_ACLK or negedge AXI_13_ARESET_N or posedge trip_hold_13)
     if (!AXI_13_ARESET_N || trip_hold_13) permit_13 <= 2'b00;
     else permit_13 <= {permit_13[0], sw_ready[0]};
-wire enabled_13 = permit_13[1] & sw_ready[0] & ~DRAM_0_STAT_CATTRIP;
+wire enabled_13 = permit_13[1] & sw_ready[0];
 wire primitive_AXI_13_ARREADY;
 assign AXI_13_ARREADY = primitive_AXI_13_ARREADY & enabled_13;
 wire primitive_AXI_13_AWREADY;
@@ -1410,7 +1410,7 @@ wire primitive_AXI_13_RVALID;
 assign AXI_13_RVALID = primitive_AXI_13_RVALID & enabled_13;
 wire primitive_AXI_13_BVALID;
 assign AXI_13_BVALID = primitive_AXI_13_BVALID & enabled_13;
-// Port 14: raw trip clamps traffic immediately, including stopped clocks.
+// Port 14: capture and permit reset assert without either clock edge.
 // APB pulse capture holds even a between-edge trip until a PCLK release.
 // Keep this capture local; the permit pair synchronizes release in ACLK.
 (* DONT_TOUCH = "TRUE" *) reg trip_hold_14 = 1'b1;
@@ -1421,7 +1421,7 @@ always @(posedge APB_0_PCLK or posedge DRAM_0_STAT_CATTRIP)
 always @(posedge AXI_14_ACLK or negedge AXI_14_ARESET_N or posedge trip_hold_14)
     if (!AXI_14_ARESET_N || trip_hold_14) permit_14 <= 2'b00;
     else permit_14 <= {permit_14[0], sw_ready[0]};
-wire enabled_14 = permit_14[1] & sw_ready[0] & ~DRAM_0_STAT_CATTRIP;
+wire enabled_14 = permit_14[1] & sw_ready[0];
 wire primitive_AXI_14_ARREADY;
 assign AXI_14_ARREADY = primitive_AXI_14_ARREADY & enabled_14;
 wire primitive_AXI_14_AWREADY;
@@ -1432,7 +1432,7 @@ wire primitive_AXI_14_RVALID;
 assign AXI_14_RVALID = primitive_AXI_14_RVALID & enabled_14;
 wire primitive_AXI_14_BVALID;
 assign AXI_14_BVALID = primitive_AXI_14_BVALID & enabled_14;
-// Port 15: raw trip clamps traffic immediately, including stopped clocks.
+// Port 15: capture and permit reset assert without either clock edge.
 // APB pulse capture holds even a between-edge trip until a PCLK release.
 // Keep this capture local; the permit pair synchronizes release in ACLK.
 (* DONT_TOUCH = "TRUE" *) reg trip_hold_15 = 1'b1;
@@ -1443,7 +1443,7 @@ always @(posedge APB_0_PCLK or posedge DRAM_0_STAT_CATTRIP)
 always @(posedge AXI_15_ACLK or negedge AXI_15_ARESET_N or posedge trip_hold_15)
     if (!AXI_15_ARESET_N || trip_hold_15) permit_15 <= 2'b00;
     else permit_15 <= {permit_15[0], sw_ready[0]};
-wire enabled_15 = permit_15[1] & sw_ready[0] & ~DRAM_0_STAT_CATTRIP;
+wire enabled_15 = permit_15[1] & sw_ready[0];
 wire primitive_AXI_15_ARREADY;
 assign AXI_15_ARREADY = primitive_AXI_15_ARREADY & enabled_15;
 wire primitive_AXI_15_AWREADY;
@@ -1454,7 +1454,7 @@ wire primitive_AXI_15_RVALID;
 assign AXI_15_RVALID = primitive_AXI_15_RVALID & enabled_15;
 wire primitive_AXI_15_BVALID;
 assign AXI_15_BVALID = primitive_AXI_15_BVALID & enabled_15;
-// Port 16: raw trip clamps traffic immediately, including stopped clocks.
+// Port 16: capture and permit reset assert without either clock edge.
 // APB pulse capture holds even a between-edge trip until a PCLK release.
 // Keep this capture local; the permit pair synchronizes release in ACLK.
 (* DONT_TOUCH = "TRUE" *) reg trip_hold_16 = 1'b1;
@@ -1465,7 +1465,7 @@ always @(posedge APB_1_PCLK or posedge DRAM_1_STAT_CATTRIP)
 always @(posedge AXI_16_ACLK or negedge AXI_16_ARESET_N or posedge trip_hold_16)
     if (!AXI_16_ARESET_N || trip_hold_16) permit_16 <= 2'b00;
     else permit_16 <= {permit_16[0], sw_ready[1]};
-wire enabled_16 = permit_16[1] & sw_ready[1] & ~DRAM_1_STAT_CATTRIP;
+wire enabled_16 = permit_16[1] & sw_ready[1];
 wire primitive_AXI_16_ARREADY;
 assign AXI_16_ARREADY = primitive_AXI_16_ARREADY & enabled_16;
 wire primitive_AXI_16_AWREADY;
@@ -1476,7 +1476,7 @@ wire primitive_AXI_16_RVALID;
 assign AXI_16_RVALID = primitive_AXI_16_RVALID & enabled_16;
 wire primitive_AXI_16_BVALID;
 assign AXI_16_BVALID = primitive_AXI_16_BVALID & enabled_16;
-// Port 17: raw trip clamps traffic immediately, including stopped clocks.
+// Port 17: capture and permit reset assert without either clock edge.
 // APB pulse capture holds even a between-edge trip until a PCLK release.
 // Keep this capture local; the permit pair synchronizes release in ACLK.
 (* DONT_TOUCH = "TRUE" *) reg trip_hold_17 = 1'b1;
@@ -1487,7 +1487,7 @@ always @(posedge APB_1_PCLK or posedge DRAM_1_STAT_CATTRIP)
 always @(posedge AXI_17_ACLK or negedge AXI_17_ARESET_N or posedge trip_hold_17)
     if (!AXI_17_ARESET_N || trip_hold_17) permit_17 <= 2'b00;
     else permit_17 <= {permit_17[0], sw_ready[1]};
-wire enabled_17 = permit_17[1] & sw_ready[1] & ~DRAM_1_STAT_CATTRIP;
+wire enabled_17 = permit_17[1] & sw_ready[1];
 wire primitive_AXI_17_ARREADY;
 assign AXI_17_ARREADY = primitive_AXI_17_ARREADY & enabled_17;
 wire primitive_AXI_17_AWREADY;
@@ -1498,7 +1498,7 @@ wire primitive_AXI_17_RVALID;
 assign AXI_17_RVALID = primitive_AXI_17_RVALID & enabled_17;
 wire primitive_AXI_17_BVALID;
 assign AXI_17_BVALID = primitive_AXI_17_BVALID & enabled_17;
-// Port 18: raw trip clamps traffic immediately, including stopped clocks.
+// Port 18: capture and permit reset assert without either clock edge.
 // APB pulse capture holds even a between-edge trip until a PCLK release.
 // Keep this capture local; the permit pair synchronizes release in ACLK.
 (* DONT_TOUCH = "TRUE" *) reg trip_hold_18 = 1'b1;
@@ -1509,7 +1509,7 @@ always @(posedge APB_1_PCLK or posedge DRAM_1_STAT_CATTRIP)
 always @(posedge AXI_18_ACLK or negedge AXI_18_ARESET_N or posedge trip_hold_18)
     if (!AXI_18_ARESET_N || trip_hold_18) permit_18 <= 2'b00;
     else permit_18 <= {permit_18[0], sw_ready[1]};
-wire enabled_18 = permit_18[1] & sw_ready[1] & ~DRAM_1_STAT_CATTRIP;
+wire enabled_18 = permit_18[1] & sw_ready[1];
 wire primitive_AXI_18_ARREADY;
 assign AXI_18_ARREADY = primitive_AXI_18_ARREADY & enabled_18;
 wire primitive_AXI_18_AWREADY;
@@ -1520,7 +1520,7 @@ wire primitive_AXI_18_RVALID;
 assign AXI_18_RVALID = primitive_AXI_18_RVALID & enabled_18;
 wire primitive_AXI_18_BVALID;
 assign AXI_18_BVALID = primitive_AXI_18_BVALID & enabled_18;
-// Port 19: raw trip clamps traffic immediately, including stopped clocks.
+// Port 19: capture and permit reset assert without either clock edge.
 // APB pulse capture holds even a between-edge trip until a PCLK release.
 // Keep this capture local; the permit pair synchronizes release in ACLK.
 (* DONT_TOUCH = "TRUE" *) reg trip_hold_19 = 1'b1;
@@ -1531,7 +1531,7 @@ always @(posedge APB_1_PCLK or posedge DRAM_1_STAT_CATTRIP)
 always @(posedge AXI_19_ACLK or negedge AXI_19_ARESET_N or posedge trip_hold_19)
     if (!AXI_19_ARESET_N || trip_hold_19) permit_19 <= 2'b00;
     else permit_19 <= {permit_19[0], sw_ready[1]};
-wire enabled_19 = permit_19[1] & sw_ready[1] & ~DRAM_1_STAT_CATTRIP;
+wire enabled_19 = permit_19[1] & sw_ready[1];
 wire primitive_AXI_19_ARREADY;
 assign AXI_19_ARREADY = primitive_AXI_19_ARREADY & enabled_19;
 wire primitive_AXI_19_AWREADY;
@@ -1542,7 +1542,7 @@ wire primitive_AXI_19_RVALID;
 assign AXI_19_RVALID = primitive_AXI_19_RVALID & enabled_19;
 wire primitive_AXI_19_BVALID;
 assign AXI_19_BVALID = primitive_AXI_19_BVALID & enabled_19;
-// Port 20: raw trip clamps traffic immediately, including stopped clocks.
+// Port 20: capture and permit reset assert without either clock edge.
 // APB pulse capture holds even a between-edge trip until a PCLK release.
 // Keep this capture local; the permit pair synchronizes release in ACLK.
 (* DONT_TOUCH = "TRUE" *) reg trip_hold_20 = 1'b1;
@@ -1553,7 +1553,7 @@ always @(posedge APB_1_PCLK or posedge DRAM_1_STAT_CATTRIP)
 always @(posedge AXI_20_ACLK or negedge AXI_20_ARESET_N or posedge trip_hold_20)
     if (!AXI_20_ARESET_N || trip_hold_20) permit_20 <= 2'b00;
     else permit_20 <= {permit_20[0], sw_ready[1]};
-wire enabled_20 = permit_20[1] & sw_ready[1] & ~DRAM_1_STAT_CATTRIP;
+wire enabled_20 = permit_20[1] & sw_ready[1];
 wire primitive_AXI_20_ARREADY;
 assign AXI_20_ARREADY = primitive_AXI_20_ARREADY & enabled_20;
 wire primitive_AXI_20_AWREADY;
@@ -1564,7 +1564,7 @@ wire primitive_AXI_20_RVALID;
 assign AXI_20_RVALID = primitive_AXI_20_RVALID & enabled_20;
 wire primitive_AXI_20_BVALID;
 assign AXI_20_BVALID = primitive_AXI_20_BVALID & enabled_20;
-// Port 21: raw trip clamps traffic immediately, including stopped clocks.
+// Port 21: capture and permit reset assert without either clock edge.
 // APB pulse capture holds even a between-edge trip until a PCLK release.
 // Keep this capture local; the permit pair synchronizes release in ACLK.
 (* DONT_TOUCH = "TRUE" *) reg trip_hold_21 = 1'b1;
@@ -1575,7 +1575,7 @@ always @(posedge APB_1_PCLK or posedge DRAM_1_STAT_CATTRIP)
 always @(posedge AXI_21_ACLK or negedge AXI_21_ARESET_N or posedge trip_hold_21)
     if (!AXI_21_ARESET_N || trip_hold_21) permit_21 <= 2'b00;
     else permit_21 <= {permit_21[0], sw_ready[1]};
-wire enabled_21 = permit_21[1] & sw_ready[1] & ~DRAM_1_STAT_CATTRIP;
+wire enabled_21 = permit_21[1] & sw_ready[1];
 wire primitive_AXI_21_ARREADY;
 assign AXI_21_ARREADY = primitive_AXI_21_ARREADY & enabled_21;
 wire primitive_AXI_21_AWREADY;
@@ -1586,7 +1586,7 @@ wire primitive_AXI_21_RVALID;
 assign AXI_21_RVALID = primitive_AXI_21_RVALID & enabled_21;
 wire primitive_AXI_21_BVALID;
 assign AXI_21_BVALID = primitive_AXI_21_BVALID & enabled_21;
-// Port 22: raw trip clamps traffic immediately, including stopped clocks.
+// Port 22: capture and permit reset assert without either clock edge.
 // APB pulse capture holds even a between-edge trip until a PCLK release.
 // Keep this capture local; the permit pair synchronizes release in ACLK.
 (* DONT_TOUCH = "TRUE" *) reg trip_hold_22 = 1'b1;
@@ -1597,7 +1597,7 @@ always @(posedge APB_1_PCLK or posedge DRAM_1_STAT_CATTRIP)
 always @(posedge AXI_22_ACLK or negedge AXI_22_ARESET_N or posedge trip_hold_22)
     if (!AXI_22_ARESET_N || trip_hold_22) permit_22 <= 2'b00;
     else permit_22 <= {permit_22[0], sw_ready[1]};
-wire enabled_22 = permit_22[1] & sw_ready[1] & ~DRAM_1_STAT_CATTRIP;
+wire enabled_22 = permit_22[1] & sw_ready[1];
 wire primitive_AXI_22_ARREADY;
 assign AXI_22_ARREADY = primitive_AXI_22_ARREADY & enabled_22;
 wire primitive_AXI_22_AWREADY;
@@ -1608,7 +1608,7 @@ wire primitive_AXI_22_RVALID;
 assign AXI_22_RVALID = primitive_AXI_22_RVALID & enabled_22;
 wire primitive_AXI_22_BVALID;
 assign AXI_22_BVALID = primitive_AXI_22_BVALID & enabled_22;
-// Port 23: raw trip clamps traffic immediately, including stopped clocks.
+// Port 23: capture and permit reset assert without either clock edge.
 // APB pulse capture holds even a between-edge trip until a PCLK release.
 // Keep this capture local; the permit pair synchronizes release in ACLK.
 (* DONT_TOUCH = "TRUE" *) reg trip_hold_23 = 1'b1;
@@ -1619,7 +1619,7 @@ always @(posedge APB_1_PCLK or posedge DRAM_1_STAT_CATTRIP)
 always @(posedge AXI_23_ACLK or negedge AXI_23_ARESET_N or posedge trip_hold_23)
     if (!AXI_23_ARESET_N || trip_hold_23) permit_23 <= 2'b00;
     else permit_23 <= {permit_23[0], sw_ready[1]};
-wire enabled_23 = permit_23[1] & sw_ready[1] & ~DRAM_1_STAT_CATTRIP;
+wire enabled_23 = permit_23[1] & sw_ready[1];
 wire primitive_AXI_23_ARREADY;
 assign AXI_23_ARREADY = primitive_AXI_23_ARREADY & enabled_23;
 wire primitive_AXI_23_AWREADY;
@@ -1630,7 +1630,7 @@ wire primitive_AXI_23_RVALID;
 assign AXI_23_RVALID = primitive_AXI_23_RVALID & enabled_23;
 wire primitive_AXI_23_BVALID;
 assign AXI_23_BVALID = primitive_AXI_23_BVALID & enabled_23;
-// Port 24: raw trip clamps traffic immediately, including stopped clocks.
+// Port 24: capture and permit reset assert without either clock edge.
 // APB pulse capture holds even a between-edge trip until a PCLK release.
 // Keep this capture local; the permit pair synchronizes release in ACLK.
 (* DONT_TOUCH = "TRUE" *) reg trip_hold_24 = 1'b1;
@@ -1641,7 +1641,7 @@ always @(posedge APB_1_PCLK or posedge DRAM_1_STAT_CATTRIP)
 always @(posedge AXI_24_ACLK or negedge AXI_24_ARESET_N or posedge trip_hold_24)
     if (!AXI_24_ARESET_N || trip_hold_24) permit_24 <= 2'b00;
     else permit_24 <= {permit_24[0], sw_ready[1]};
-wire enabled_24 = permit_24[1] & sw_ready[1] & ~DRAM_1_STAT_CATTRIP;
+wire enabled_24 = permit_24[1] & sw_ready[1];
 wire primitive_AXI_24_ARREADY;
 assign AXI_24_ARREADY = primitive_AXI_24_ARREADY & enabled_24;
 wire primitive_AXI_24_AWREADY;
@@ -1652,7 +1652,7 @@ wire primitive_AXI_24_RVALID;
 assign AXI_24_RVALID = primitive_AXI_24_RVALID & enabled_24;
 wire primitive_AXI_24_BVALID;
 assign AXI_24_BVALID = primitive_AXI_24_BVALID & enabled_24;
-// Port 25: raw trip clamps traffic immediately, including stopped clocks.
+// Port 25: capture and permit reset assert without either clock edge.
 // APB pulse capture holds even a between-edge trip until a PCLK release.
 // Keep this capture local; the permit pair synchronizes release in ACLK.
 (* DONT_TOUCH = "TRUE" *) reg trip_hold_25 = 1'b1;
@@ -1663,7 +1663,7 @@ always @(posedge APB_1_PCLK or posedge DRAM_1_STAT_CATTRIP)
 always @(posedge AXI_25_ACLK or negedge AXI_25_ARESET_N or posedge trip_hold_25)
     if (!AXI_25_ARESET_N || trip_hold_25) permit_25 <= 2'b00;
     else permit_25 <= {permit_25[0], sw_ready[1]};
-wire enabled_25 = permit_25[1] & sw_ready[1] & ~DRAM_1_STAT_CATTRIP;
+wire enabled_25 = permit_25[1] & sw_ready[1];
 wire primitive_AXI_25_ARREADY;
 assign AXI_25_ARREADY = primitive_AXI_25_ARREADY & enabled_25;
 wire primitive_AXI_25_AWREADY;
@@ -1674,7 +1674,7 @@ wire primitive_AXI_25_RVALID;
 assign AXI_25_RVALID = primitive_AXI_25_RVALID & enabled_25;
 wire primitive_AXI_25_BVALID;
 assign AXI_25_BVALID = primitive_AXI_25_BVALID & enabled_25;
-// Port 26: raw trip clamps traffic immediately, including stopped clocks.
+// Port 26: capture and permit reset assert without either clock edge.
 // APB pulse capture holds even a between-edge trip until a PCLK release.
 // Keep this capture local; the permit pair synchronizes release in ACLK.
 (* DONT_TOUCH = "TRUE" *) reg trip_hold_26 = 1'b1;
@@ -1685,7 +1685,7 @@ always @(posedge APB_1_PCLK or posedge DRAM_1_STAT_CATTRIP)
 always @(posedge AXI_26_ACLK or negedge AXI_26_ARESET_N or posedge trip_hold_26)
     if (!AXI_26_ARESET_N || trip_hold_26) permit_26 <= 2'b00;
     else permit_26 <= {permit_26[0], sw_ready[1]};
-wire enabled_26 = permit_26[1] & sw_ready[1] & ~DRAM_1_STAT_CATTRIP;
+wire enabled_26 = permit_26[1] & sw_ready[1];
 wire primitive_AXI_26_ARREADY;
 assign AXI_26_ARREADY = primitive_AXI_26_ARREADY & enabled_26;
 wire primitive_AXI_26_AWREADY;
@@ -1696,7 +1696,7 @@ wire primitive_AXI_26_RVALID;
 assign AXI_26_RVALID = primitive_AXI_26_RVALID & enabled_26;
 wire primitive_AXI_26_BVALID;
 assign AXI_26_BVALID = primitive_AXI_26_BVALID & enabled_26;
-// Port 27: raw trip clamps traffic immediately, including stopped clocks.
+// Port 27: capture and permit reset assert without either clock edge.
 // APB pulse capture holds even a between-edge trip until a PCLK release.
 // Keep this capture local; the permit pair synchronizes release in ACLK.
 (* DONT_TOUCH = "TRUE" *) reg trip_hold_27 = 1'b1;
@@ -1707,7 +1707,7 @@ always @(posedge APB_1_PCLK or posedge DRAM_1_STAT_CATTRIP)
 always @(posedge AXI_27_ACLK or negedge AXI_27_ARESET_N or posedge trip_hold_27)
     if (!AXI_27_ARESET_N || trip_hold_27) permit_27 <= 2'b00;
     else permit_27 <= {permit_27[0], sw_ready[1]};
-wire enabled_27 = permit_27[1] & sw_ready[1] & ~DRAM_1_STAT_CATTRIP;
+wire enabled_27 = permit_27[1] & sw_ready[1];
 wire primitive_AXI_27_ARREADY;
 assign AXI_27_ARREADY = primitive_AXI_27_ARREADY & enabled_27;
 wire primitive_AXI_27_AWREADY;
@@ -1718,7 +1718,7 @@ wire primitive_AXI_27_RVALID;
 assign AXI_27_RVALID = primitive_AXI_27_RVALID & enabled_27;
 wire primitive_AXI_27_BVALID;
 assign AXI_27_BVALID = primitive_AXI_27_BVALID & enabled_27;
-// Port 28: raw trip clamps traffic immediately, including stopped clocks.
+// Port 28: capture and permit reset assert without either clock edge.
 // APB pulse capture holds even a between-edge trip until a PCLK release.
 // Keep this capture local; the permit pair synchronizes release in ACLK.
 (* DONT_TOUCH = "TRUE" *) reg trip_hold_28 = 1'b1;
@@ -1729,7 +1729,7 @@ always @(posedge APB_1_PCLK or posedge DRAM_1_STAT_CATTRIP)
 always @(posedge AXI_28_ACLK or negedge AXI_28_ARESET_N or posedge trip_hold_28)
     if (!AXI_28_ARESET_N || trip_hold_28) permit_28 <= 2'b00;
     else permit_28 <= {permit_28[0], sw_ready[1]};
-wire enabled_28 = permit_28[1] & sw_ready[1] & ~DRAM_1_STAT_CATTRIP;
+wire enabled_28 = permit_28[1] & sw_ready[1];
 wire primitive_AXI_28_ARREADY;
 assign AXI_28_ARREADY = primitive_AXI_28_ARREADY & enabled_28;
 wire primitive_AXI_28_AWREADY;
@@ -1740,7 +1740,7 @@ wire primitive_AXI_28_RVALID;
 assign AXI_28_RVALID = primitive_AXI_28_RVALID & enabled_28;
 wire primitive_AXI_28_BVALID;
 assign AXI_28_BVALID = primitive_AXI_28_BVALID & enabled_28;
-// Port 29: raw trip clamps traffic immediately, including stopped clocks.
+// Port 29: capture and permit reset assert without either clock edge.
 // APB pulse capture holds even a between-edge trip until a PCLK release.
 // Keep this capture local; the permit pair synchronizes release in ACLK.
 (* DONT_TOUCH = "TRUE" *) reg trip_hold_29 = 1'b1;
@@ -1751,7 +1751,7 @@ always @(posedge APB_1_PCLK or posedge DRAM_1_STAT_CATTRIP)
 always @(posedge AXI_29_ACLK or negedge AXI_29_ARESET_N or posedge trip_hold_29)
     if (!AXI_29_ARESET_N || trip_hold_29) permit_29 <= 2'b00;
     else permit_29 <= {permit_29[0], sw_ready[1]};
-wire enabled_29 = permit_29[1] & sw_ready[1] & ~DRAM_1_STAT_CATTRIP;
+wire enabled_29 = permit_29[1] & sw_ready[1];
 wire primitive_AXI_29_ARREADY;
 assign AXI_29_ARREADY = primitive_AXI_29_ARREADY & enabled_29;
 wire primitive_AXI_29_AWREADY;
@@ -1762,7 +1762,7 @@ wire primitive_AXI_29_RVALID;
 assign AXI_29_RVALID = primitive_AXI_29_RVALID & enabled_29;
 wire primitive_AXI_29_BVALID;
 assign AXI_29_BVALID = primitive_AXI_29_BVALID & enabled_29;
-// Port 30: raw trip clamps traffic immediately, including stopped clocks.
+// Port 30: capture and permit reset assert without either clock edge.
 // APB pulse capture holds even a between-edge trip until a PCLK release.
 // Keep this capture local; the permit pair synchronizes release in ACLK.
 (* DONT_TOUCH = "TRUE" *) reg trip_hold_30 = 1'b1;
@@ -1773,7 +1773,7 @@ always @(posedge APB_1_PCLK or posedge DRAM_1_STAT_CATTRIP)
 always @(posedge AXI_30_ACLK or negedge AXI_30_ARESET_N or posedge trip_hold_30)
     if (!AXI_30_ARESET_N || trip_hold_30) permit_30 <= 2'b00;
     else permit_30 <= {permit_30[0], sw_ready[1]};
-wire enabled_30 = permit_30[1] & sw_ready[1] & ~DRAM_1_STAT_CATTRIP;
+wire enabled_30 = permit_30[1] & sw_ready[1];
 wire primitive_AXI_30_ARREADY;
 assign AXI_30_ARREADY = primitive_AXI_30_ARREADY & enabled_30;
 wire primitive_AXI_30_AWREADY;
@@ -1784,7 +1784,7 @@ wire primitive_AXI_30_RVALID;
 assign AXI_30_RVALID = primitive_AXI_30_RVALID & enabled_30;
 wire primitive_AXI_30_BVALID;
 assign AXI_30_BVALID = primitive_AXI_30_BVALID & enabled_30;
-// Port 31: raw trip clamps traffic immediately, including stopped clocks.
+// Port 31: capture and permit reset assert without either clock edge.
 // APB pulse capture holds even a between-edge trip until a PCLK release.
 // Keep this capture local; the permit pair synchronizes release in ACLK.
 (* DONT_TOUCH = "TRUE" *) reg trip_hold_31 = 1'b1;
@@ -1795,7 +1795,7 @@ always @(posedge APB_1_PCLK or posedge DRAM_1_STAT_CATTRIP)
 always @(posedge AXI_31_ACLK or negedge AXI_31_ARESET_N or posedge trip_hold_31)
     if (!AXI_31_ARESET_N || trip_hold_31) permit_31 <= 2'b00;
     else permit_31 <= {permit_31[0], sw_ready[1]};
-wire enabled_31 = permit_31[1] & sw_ready[1] & ~DRAM_1_STAT_CATTRIP;
+wire enabled_31 = permit_31[1] & sw_ready[1];
 wire primitive_AXI_31_ARREADY;
 assign AXI_31_ARREADY = primitive_AXI_31_ARREADY & enabled_31;
 wire primitive_AXI_31_AWREADY;
