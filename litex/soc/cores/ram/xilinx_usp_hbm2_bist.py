@@ -10,7 +10,7 @@ from pathlib import Path
 from migen import Cat, ClockSignal, If, Instance, Mux, ResetSignal, Signal
 from migen.genlib.record import DIR_M_TO_S
 from litex.gen import LiteXModule
-from litex.soc.interconnect import axi
+from litex.soc.interconnect import axi, stream
 from litex.soc.interconnect.csr import CSRStatus, CSRStorage
 
 
@@ -29,6 +29,7 @@ class HBMBurstBIST(LiteXModule):
         self._ports = {}
         self._port_csrs = {}
         self.engines, self.engine_status = {}, {}
+        self.response_buffers = {}
         self._csrs = []
         def storage(name, width, reset=0):
             value = CSRStorage(width, reset=reset, name=name)
@@ -125,6 +126,19 @@ class HBMBurstBIST(LiteXModule):
                 raise ValueError("BIST uses the ordered-write AXI4 shape of the HBM AXI3 subset")
         engine = axi.AXIInterface(data_width=256, address_width=33, id_width=6)
         self.engines[channel] = engine
+        mux_engine = axi.AXIInterface(data_width=256, address_width=33, id_width=6)
+        # Only BIST responses are buffered. CPU return paths and all forward
+        # channels retain their original handshake/address behavior.
+        for group in ("aw", "w", "ar"):
+            self.comb += getattr(engine, group).connect(getattr(mux_engine, group))
+        self.response_buffers[channel] = {}
+        for group in ("b", "r"):
+            response = getattr(mux_engine, group)
+            buffer = stream.Buffer(response.description, pipe_valid=True, pipe_ready=True)
+            self.submodules += buffer
+            self.response_buffers[channel][group] = buffer
+            self.comb += response.connect(buffer.sink)
+            self.comb += buffer.source.connect(getattr(engine, group))
         metrics = {name: Signal(width, name=f"hbm_bist_pc{channel:02d}_{name}")
             for name, width in (("write_beats", 64), ("read_beats", 64),
                 ("cycles", 64), ("errors", 64), ("first_address", 33),
@@ -141,7 +155,11 @@ class HBMBurstBIST(LiteXModule):
             self.busy_mask[channel].eq(busy), self.done_mask[channel].eq(done),
             self.stopped_mask[channel].eq(stopped),
             self.error_mask[channel].eq(faulted),
-            self._transfer[channel].eq(transfer),
+            # Count concurrent native-side acceptance, before BIST response
+            # buffers; engine read consumption can occur a later cycle.
+            self._transfer[channel].eq(self.owner &
+                ((mux_axi.w.valid & mux_axi.w.ready) |
+                 (mux_axi.r.valid & mux_axi.r.ready))),
         ]
         parameters = dict(p_CHANNEL=channel, i_clk=ClockSignal("sys"), i_rst=ResetSignal("sys"),
             i_start=self.accepted_start, i_enable=self.mask.storage[channel],
@@ -173,7 +191,7 @@ class HBMBurstBIST(LiteXModule):
         for group, name, direction in mux_axi.layout_flat():
             target = getattr(getattr(mux_axi, group), name)
             cpu = getattr(getattr(cpu_axi, group), name)
-            bist = getattr(getattr(engine, group), name)
+            bist = getattr(getattr(mux_engine, group), name)
             if direction == DIR_M_TO_S:
                 self.comb += target.eq(Mux(self.owner, bist, cpu))
             elif name in ("valid", "ready"):
@@ -185,6 +203,8 @@ class HBMBurstBIST(LiteXModule):
             for name in ("lock", "cache", "prot", "qos", "region"):
                 if hasattr(group, name): self.comb += getattr(group, name).eq(0)
         idle = Signal(name=f"hbm_bist_pc{channel:02d}_idle")
+        # Busy persists until the engine consumes terminal buffered responses,
+        # so aggregate drain cannot complete merely on native buffer acceptance.
         self.comb += idle.eq(~busy)
         return idle
 

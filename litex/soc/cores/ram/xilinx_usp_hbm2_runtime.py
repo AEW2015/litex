@@ -59,7 +59,7 @@ class HBMRuntimeQuiesce(LiteXModule):
     """
     CHANNELS = tuple(range(32))
 
-    def __init__(self, platform, channels=CHANNELS):
+    def __init__(self, platform, channels=CHANNELS, *, registered_request=False):
         if tuple(channels) != self.CHANNELS:
             raise ValueError("Runtime interposer requires native channels 0 through 31")
         self.channels = tuple(channels)
@@ -83,10 +83,18 @@ class HBMRuntimeQuiesce(LiteXModule):
         self.all_drained = Signal()
         self.external_fault = Signal()
         self._ports = set()
+        raw_request = Signal()
+        self.comb += raw_request.eq(self.request.storage |
+                                   (self.error.status != 0) | self.external_fault)
+        # Optional global fanout cut. Local tracker errors still stop their
+        # own port immediately; only cross-port/software requests gain a cycle.
+        # Raw faults remain visible and prohibit a successful quiesced result.
+        if registered_request:
+            self.sync += self.quiesce_request.eq(raw_request)
+        else:
+            self.comb += self.quiesce_request.eq(raw_request)
         self.comb += [
             self.all_drained.eq(self.drained.status == 0xffffffff),
-            self.quiesce_request.eq(self.request.storage |
-                                    (self.error.status != 0) | self.external_fault),
             self.quiesced.eq(self.quiesce_request & self.all_drained &
                              (self.error.status == 0) & ~self.external_fault),
             self.status.status.eq(Cat(self.quiesce_request, self.all_drained,
