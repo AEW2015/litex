@@ -29,7 +29,7 @@ class HBMBurstBIST(LiteXModule):
         self._ports = {}
         self._port_csrs = {}
         self.engines, self.engine_status = {}, {}
-        self.response_buffers = {}
+        self.request_buffers, self.response_buffers = {}, {}
         self._csrs = []
         def storage(name, width, reset=0):
             value = CSRStorage(width, reset=reset, name=name)
@@ -127,10 +127,16 @@ class HBMBurstBIST(LiteXModule):
         engine = axi.AXIInterface(data_width=256, address_width=33, id_width=6)
         self.engines[channel] = engine
         mux_engine = axi.AXIInterface(data_width=256, address_width=33, id_width=6)
-        # Only BIST responses are buffered. CPU return paths and all forward
-        # channels retain their original handshake/address behavior.
+        # Slice only the BIST branch; CPU paths retain their existing timing.
+        # Independent channels preserve AW/W independence and full payloads.
+        self.request_buffers[channel] = {}
         for group in ("aw", "w", "ar"):
-            self.comb += getattr(engine, group).connect(getattr(mux_engine, group))
+            request = getattr(engine, group)
+            buffer = stream.Buffer(request.description, pipe_valid=True, pipe_ready=True)
+            self.submodules += buffer
+            self.request_buffers[channel][group] = buffer
+            self.comb += request.connect(buffer.sink)
+            self.comb += buffer.source.connect(getattr(mux_engine, group))
         self.response_buffers[channel] = {}
         for group in ("b", "r"):
             response = getattr(mux_engine, group)
@@ -203,8 +209,9 @@ class HBMBurstBIST(LiteXModule):
             for name in ("lock", "cache", "prot", "qos", "region"):
                 if hasattr(group, name): self.comb += getattr(group, name).eq(0)
         idle = Signal(name=f"hbm_bist_pc{channel:02d}_idle")
-        # Busy persists until the engine consumes terminal buffered responses,
-        # so aggregate drain cannot complete merely on native buffer acceptance.
+        # Busy persists through terminal response consumption and checking.
+        # A native B/R terminal response requires all preceding requests to have
+        # retired, so no queued BIST request can survive aggregate drain.
         self.comb += idle.eq(~busy)
         return idle
 

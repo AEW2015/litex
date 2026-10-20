@@ -35,15 +35,16 @@ module fk33_hbm_bist #(parameter integer CHANNEL=0)(
  input wire [1:0] m_rresp,input wire m_rlast,m_rvalid,
  output wire m_rready
 );
- localparam [2:0] IDLE=0,AW=1,W=2,B=3,AR=4,R=5;
+ localparam [2:0] IDLE=0,AW=1,CHECK=2,B=3,AR=4,R=5;
  localparam [4:0] ADDRESS_TAG=5'd4+(CHANNEL%4);
  reg [2:0] state;
  reg [18:0] unit_hi,next_unit_hi;
  reg [4:0] beats,beat;
- reg [31:0] count,strobe,unit_index;
+ reg [31:0] count,unit_index;
  // Keep these captured configuration FFs local to each engine. Otherwise
  // equivalent registers merge across ports and route into remote checkers.
  (* DONT_TOUCH = "TRUE" *) reg [31:0] seed;
+ (* DONT_TOUCH = "TRUE" *) reg [31:0] strobe;
  (* DONT_TOUCH = "TRUE" *) reg masked;
  reg [2:0] stall;
  reg mask_phase,stop_pending,w_held,aw_done,w_done;
@@ -175,18 +176,22 @@ module fk33_hbm_bist #(parameter integer CHANNEL=0)(
     end
     AR:if(ar_fire) begin state<=R;beat<=0;end
     R:if(r_fire) begin
-     // Consume an actual terminal response even if LAST is early/late.
-     // A missing LAST keeps the engine busy: no fabricated drain result.
-     if(m_rlast) begin
-      if(stop_pending||stop||faulted||response_error||unit_index==count-1'b1) begin
-       state<=IDLE;done<=1;
-       stopped<=stop_pending||stop||faulted||response_error;
-      end else begin
-       unit_index<=unit_index+1'b1;
-       unit_hi<=next_unit_hi;next_unit_hi<=next_unit_hi+19'd1;
-       mask_phase<=0;beat<=0;state<=AW;aw_done<=0;w_done<=0;
-      end
-     end else if(beat<31) beat<=beat+1'b1;
+     // Missing LAST never fabricates drain. Actual terminal responses enter a
+     // busy check boundary so this beat's fault FF commits before unit control.
+     if(m_rlast) state<=CHECK;
+     else if(beat<31) beat<=beat+1'b1;
+    end
+    CHECK:begin
+     // Error metadata was captured on the terminal handshake, including an
+     // early/late LAST. Keep the data comparison out of address/counter enables.
+     if(stop_pending||stop||faulted||unit_index==count-1'b1) begin
+      state<=IDLE;done<=1;
+      stopped<=stop_pending||stop||faulted;
+     end else begin
+      unit_index<=unit_index+1'b1;
+      unit_hi<=next_unit_hi;next_unit_hi<=next_unit_hi+19'd1;
+      mask_phase<=0;beat<=0;state<=AW;aw_done<=0;w_done<=0;
+     end
     end
     default:state<=IDLE;
    endcase
