@@ -1,0 +1,174 @@
+// One ordered AXI burst unit per native HBM port. No clock/reset/HBM control.
+`timescale 1ns/1ps
+module fk33_hbm_bist #(parameter integer CHANNEL=0)(
+ input wire clk,rst,start,enable,stop,
+ input wire [27:0] cfg_base,
+ input wire [4:0] cfg_beats,
+ input wire [31:0] cfg_count,cfg_seed,cfg_strobe,
+ input wire [2:0] cfg_stall,
+ input wire cfg_masked,
+ output wire busy,
+ output reg done,stopped,
+ output reg [63:0] write_beats,read_beats,cycles,errors,
+ output reg [32:0] first_bad_addr,
+ output reg [31:0] first_bad_expected,first_bad_actual,
+ output reg [7:0] first_bad_code,
+ output wire transfer,
+ output wire [32:0] m_awaddr,
+ output wire [5:0] m_awid,
+ output wire [7:0] m_awlen,
+ output wire [2:0] m_awsize,
+ output wire [1:0] m_awburst,
+ output wire m_awvalid,input wire m_awready,
+ output reg [255:0] m_wdata,
+ output wire [31:0] m_wstrb,
+ output wire m_wlast,m_wvalid,input wire m_wready,
+ input wire [5:0] m_bid,input wire [1:0] m_bresp,
+ input wire m_bvalid,output wire m_bready,
+ output wire [32:0] m_araddr,
+ output wire [5:0] m_arid,
+ output wire [7:0] m_arlen,
+ output wire [2:0] m_arsize,
+ output wire [1:0] m_arburst,
+ output wire m_arvalid,input wire m_arready,
+ input wire [5:0] m_rid,input wire [255:0] m_rdata,
+ input wire [1:0] m_rresp,input wire m_rlast,m_rvalid,
+ output wire m_rready
+);
+ localparam [2:0] IDLE=0,AW=1,W=2,B=3,AR=4,R=5;
+ localparam [4:0] ADDRESS_TAG=5'd4+(CHANNEL%4);
+ reg [2:0] state;
+ reg [27:0] base;
+ reg [4:0] beats,beat;
+ reg [31:0] count,seed,strobe,unit_index;
+ reg [2:0] stall;
+ reg masked,mask_phase,stop_pending,w_held,aw_done,w_done;
+ wire [27:0] unit_addr=base+(unit_index<<9);
+ wire [27:0] beat_addr=unit_addr+(beat<<5);
+ wire [32:0] full_beat_addr={ADDRESS_TAG,beat_addr};
+ assign busy=state!=IDLE;
+ assign m_awaddr={ADDRESS_TAG,unit_addr};
+ assign m_araddr={ADDRESS_TAG,unit_addr};
+ assign m_awid=6'd1;
+ assign m_arid=6'd1;
+ assign m_awlen={3'b000,beats}-1'b1;
+ assign m_arlen={3'b000,beats}-1'b1;
+ assign m_awsize=3'd5;
+ assign m_arsize=3'd5;
+ assign m_awburst=2'b01;
+ assign m_arburst=2'b01;
+ assign m_awvalid=state==AW && !aw_done;
+ assign m_arvalid=state==AR;
+ assign m_wvalid=state==AW && !w_done && (!stall[0] || cycles[1:0]!=0 || w_held);
+ assign m_wlast=beat==beats-1'b1;
+ assign m_wstrb=mask_phase ? strobe : 32'hffffffff;
+ assign m_bready=state==B && (!stall[2] || cycles[2:0]>=3);
+ assign m_rready=state==R && (!stall[1] || cycles[2:0]>=3);
+ wire aw_fire=m_awvalid&&m_awready;
+ wire w_fire=m_wvalid&&m_wready;
+ wire b_fire=m_bvalid&&m_bready;
+ wire ar_fire=m_arvalid&&m_arready;
+ wire r_fire=m_rvalid&&m_rready;
+ assign transfer=w_fire|r_fire;
+ function automatic [31:0] pattern(input [27:0] address,input integer lane,input [31:0] value_seed);
+  pattern=value_seed ^ 32'h94660000 ^ (CHANNEL*32'h01010101) ^
+          {4'b0,address} ^ (lane*32'h01020304);
+ endfunction
+ integer lane,byte_index;
+ reg [31:0] lane_pattern,lane_expected;
+ reg data_bad;
+ reg [2:0] bad_lane;
+ reg [31:0] bad_expected,bad_actual;
+ always @* begin
+  m_wdata=0;data_bad=0;bad_lane=0;bad_expected=0;bad_actual=0;
+  lane_pattern=0;lane_expected=0;
+  for(lane=0;lane<8;lane=lane+1) begin
+   lane_pattern=pattern(beat_addr+lane*4,lane,seed);
+   m_wdata[lane*32+:32]=mask_phase ? ~lane_pattern : lane_pattern;
+   lane_expected=lane_pattern;
+   for(byte_index=0;byte_index<4;byte_index=byte_index+1)
+    if(masked&&strobe[lane*4+byte_index])
+     lane_expected[byte_index*8+:8]=~lane_pattern[byte_index*8+:8];
+   if(!data_bad&&m_rdata[lane*32+:32]!=lane_expected) begin
+    data_bad=1;bad_lane=lane;bad_expected=lane_expected;bad_actual=m_rdata[lane*32+:32];
+   end
+  end
+ end
+ reg [7:0] event_code;
+ reg [32:0] event_addr;
+ reg [31:0] event_expected,event_actual;
+ always @* begin
+  event_code=0;event_addr=full_beat_addr;event_expected=0;event_actual=0;
+  if(b_fire) begin
+   if(m_bid!=6'd1) begin event_code=1;event_expected=1;event_actual={26'b0,m_bid};end
+   else if(m_bresp!=0) begin event_code=2;event_actual={30'b0,m_bresp};end
+  end
+  if(r_fire) begin
+   if(m_rid!=6'd1) begin event_code=3;event_expected=1;event_actual={26'b0,m_rid};end
+   else if(m_rresp!=0) begin event_code=4;event_actual={30'b0,m_rresp};end
+   else if(m_rlast!=(beat==beats-1'b1)) begin
+    event_code=5;event_expected=beat==beats-1'b1;event_actual=m_rlast;
+   end else if(data_bad) begin
+    event_code=6;event_addr=full_beat_addr+bad_lane*4;
+    event_expected=bad_expected;event_actual=bad_actual;
+   end
+  end
+ end
+ always @(posedge clk) begin
+  if(rst) begin
+   state<=IDLE;done<=0;stopped<=0;write_beats<=0;read_beats<=0;cycles<=0;errors<=0;
+   first_bad_addr<=0;first_bad_expected<=0;first_bad_actual<=0;first_bad_code<=0;
+   base<=0;beats<=0;count<=0;seed<=0;strobe<=0;stall<=0;masked<=0;
+   beat<=0;unit_index<=0;mask_phase<=0;stop_pending<=0;w_held<=0;aw_done<=0;w_done<=0;
+  end else if(start) begin
+   // Hub sends START to all ports: unselected counters clear without traffic.
+   state<=enable ? AW : IDLE;done<=0;stopped<=0;
+   write_beats<=0;read_beats<=0;cycles<=0;errors<=0;
+   first_bad_addr<=0;first_bad_expected<=0;first_bad_actual<=0;first_bad_code<=0;
+   base<=cfg_base;beats<=cfg_beats;count<=cfg_count;seed<=cfg_seed;
+   strobe<=cfg_strobe;stall<=cfg_stall;masked<=cfg_masked;
+   beat<=0;unit_index<=0;mask_phase<=0;stop_pending<=0;w_held<=0;aw_done<=0;w_done<=0;
+  end else begin
+   if(busy) cycles<=cycles+1'b1;
+   if(busy&&(stop||errors!=0)) stop_pending<=1;
+   if(m_wvalid&&!m_wready) w_held<=1;
+   else if(w_fire) w_held<=0;
+   if(w_fire) write_beats<=write_beats+1'b1;
+   if(r_fire) read_beats<=read_beats+1'b1;
+   if(event_code!=0) begin
+    errors<=errors+1'b1;
+    if(errors==0) begin
+     first_bad_addr<=event_addr;first_bad_expected<=event_expected;
+     first_bad_actual<=event_actual;first_bad_code<=event_code;
+    end
+   end
+   case(state)
+    AW:begin
+     // AW and W are independent; neither VALID waits for the other's READY.
+     if(aw_fire) aw_done<=1;
+     if(w_fire) begin
+      if(m_wlast) w_done<=1;
+      else beat<=beat+1'b1;
+     end
+     if((aw_done||aw_fire)&&(w_done||(w_fire&&m_wlast))) begin state<=B;beat<=0;end
+    end
+    B:if(b_fire) begin
+     if(masked&&!mask_phase) begin mask_phase<=1;state<=AW;aw_done<=0;w_done<=0;beat<=0;end
+     else begin state<=AR;beat<=0;end
+    end
+    AR:if(ar_fire) begin state<=R;beat<=0;end
+    R:if(r_fire) begin
+     // Consume an actual terminal response even if LAST is early/late.
+     // A missing LAST keeps the engine busy: no fabricated drain result.
+     if(m_rlast) begin
+      if(stop_pending||stop||errors!=0||event_code!=0||unit_index==count-1'b1) begin
+       state<=IDLE;done<=1;
+       stopped<=stop_pending||stop||errors!=0||event_code!=0;
+      end else begin unit_index<=unit_index+1'b1;mask_phase<=0;beat<=0;state<=AW;aw_done<=0;w_done<=0;end
+     end else if(beat<31) beat<=beat+1'b1;
+    end
+    default:state<=IDLE;
+   endcase
+  end
+ end
+endmodule
