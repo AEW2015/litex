@@ -66,15 +66,17 @@ class HBMBurstBIST(LiteXModule):
         request = self.start.re & self.start.storage
         available = (ready & all_drained & host_idle & ~quiesce_request &
                      ~self.owner & (self.busy_mask == 0))
-        end_address = Signal(42)
+        # Aligned 512-byte units and 1..16 beats make the final-byte bound
+        # equivalent to base_units + count <= 0x80000. Bound all 32 count bits
+        # separately before using the narrow sum; invalid high bits cannot wrap.
+        end_unit = Signal(21)
         self.comb += [
-            end_address.eq(self.base.storage + ((self.burst_count.storage - 1) << 9) +
-                           (self.burst_beats.storage << 5)),
+            end_unit.eq(self.base.storage[9:] + self.burst_count.storage[:20]),
             self.config_valid.eq((self.mask.storage != 0) &
                 (self.base.storage[:9] == 0) &
                 (self.burst_beats.storage >= 1) & (self.burst_beats.storage <= 16) &
                 (self.burst_count.storage >= 1) & (self.burst_count.storage <= 0x80000) &
-                (end_address <= 0x10000000)),
+                (end_unit <= 0x80000)),
             self.accepted_start.eq(request & available & self.config_valid),
             self.start_rejected.eq(request & ~self.accepted_start),
             self._busy_csr.status.eq(self.busy_mask),
@@ -128,7 +130,7 @@ class HBMBurstBIST(LiteXModule):
                 ("cycles", 64), ("errors", 64), ("first_address", 33),
                 ("expected", 32), ("actual", 32), ("code", 8))}
         self.engine_status[channel] = metrics
-        busy, done, stopped, transfer = Signal(), Signal(), Signal(), Signal()
+        busy, done, stopped, faulted, transfer = Signal(), Signal(), Signal(), Signal(), Signal()
         self._ports[channel] = busy
         csrs = []
         for name, value in metrics.items():
@@ -138,7 +140,7 @@ class HBMBurstBIST(LiteXModule):
         self.comb += [
             self.busy_mask[channel].eq(busy), self.done_mask[channel].eq(done),
             self.stopped_mask[channel].eq(stopped),
-            self.error_mask[channel].eq(metrics["errors"] != 0),
+            self.error_mask[channel].eq(faulted),
             self._transfer[channel].eq(transfer),
         ]
         parameters = dict(p_CHANNEL=channel, i_clk=ClockSignal("sys"), i_rst=ResetSignal("sys"),
@@ -148,7 +150,7 @@ class HBMBurstBIST(LiteXModule):
             i_cfg_count=self.burst_count.storage, i_cfg_seed=self.seed.storage,
             i_cfg_strobe=self.strobe.storage, i_cfg_stall=self.stall.storage,
             i_cfg_masked=self.masked.storage,
-            o_busy=busy, o_done=done, o_stopped=stopped, o_transfer=transfer,
+            o_busy=busy, o_done=done, o_stopped=stopped, o_faulted=faulted, o_transfer=transfer,
             o_write_beats=metrics["write_beats"], o_read_beats=metrics["read_beats"],
             o_cycles=metrics["cycles"], o_errors=metrics["errors"],
             o_first_bad_addr=metrics["first_address"],

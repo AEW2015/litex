@@ -8,7 +8,7 @@ module fk33_hbm_bist #(parameter integer CHANNEL=0)(
  input wire [2:0] cfg_stall,
  input wire cfg_masked,
  output wire busy,
- output reg done,stopped,
+ output reg done,stopped,faulted,
  output reg [63:0] write_beats,read_beats,cycles,errors,
  output reg [32:0] first_bad_addr,
  output reg [31:0] first_bad_expected,first_bad_actual,
@@ -128,28 +128,29 @@ module fk33_hbm_bist #(parameter integer CHANNEL=0)(
  end
  always @(posedge clk) begin
   if(rst) begin
-   state<=IDLE;done<=0;stopped<=0;write_beats<=0;read_beats<=0;cycles<=0;errors<=0;
+   state<=IDLE;done<=0;stopped<=0;write_beats<=0;read_beats<=0;cycles<=0;errors<=0;faulted<=0;
    first_bad_addr<=0;first_bad_expected<=0;first_bad_actual<=0;first_bad_code<=0;
    unit_hi<=0;next_unit_hi<=0;beats<=0;count<=0;seed<=0;strobe<=0;stall<=0;masked<=0;
    beat<=0;unit_index<=0;mask_phase<=0;stop_pending<=0;w_held<=0;aw_done<=0;w_done<=0;
   end else if(start) begin
    // Hub sends START to all ports: unselected counters clear without traffic.
    state<=enable ? AW : IDLE;done<=0;stopped<=0;
-   write_beats<=0;read_beats<=0;cycles<=0;errors<=0;
+   write_beats<=0;read_beats<=0;cycles<=0;errors<=0;faulted<=0;
    first_bad_addr<=0;first_bad_expected<=0;first_bad_actual<=0;first_bad_code<=0;
    unit_hi<=cfg_base[27:9];next_unit_hi<=cfg_base[27:9]+19'd1;beats<=cfg_beats;count<=cfg_count;seed<=cfg_seed;
    strobe<=cfg_strobe;stall<=cfg_stall;masked<=cfg_masked;
    beat<=0;unit_index<=0;mask_phase<=0;stop_pending<=0;w_held<=0;aw_done<=0;w_done<=0;
   end else begin
    if(busy) cycles<=cycles+1'b1;
-   if(busy&&(stop||errors!=0)) stop_pending<=1;
+   if(busy&&(stop||faulted)) stop_pending<=1;
    if(m_wvalid&&!m_wready) w_held<=1;
    else if(w_fire) w_held<=0;
    if(w_fire) write_beats<=write_beats+1'b1;
    if(r_fire) read_beats<=read_beats+1'b1;
    if(response_error) begin
-    errors<=errors+1'b1;
-    if(errors==0) begin
+    // Fault control is independent of telemetry counter width and overflow.
+    faulted<=1;errors<=errors+1'b1;
+    if(!faulted) begin
      first_bad_addr<=event_addr;first_bad_expected<=event_expected;
      first_bad_actual<=event_actual;first_bad_code<=event_code;
     end
@@ -173,9 +174,9 @@ module fk33_hbm_bist #(parameter integer CHANNEL=0)(
      // Consume an actual terminal response even if LAST is early/late.
      // A missing LAST keeps the engine busy: no fabricated drain result.
      if(m_rlast) begin
-      if(stop_pending||stop||errors!=0||response_error||unit_index==count-1'b1) begin
+      if(stop_pending||stop||faulted||response_error||unit_index==count-1'b1) begin
        state<=IDLE;done<=1;
-       stopped<=stop_pending||stop||errors!=0||response_error;
+       stopped<=stop_pending||stop||faulted||response_error;
       end else begin
        unit_index<=unit_index+1'b1;
        unit_hi<=next_unit_hi;next_unit_hi<=next_unit_hi+19'd1;
