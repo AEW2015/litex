@@ -84,7 +84,16 @@ module fk33_hbm_bist #(parameter integer CHANNEL=0)(
  endfunction
  wire [31:0] lane_expected[0:7];
  wire [7:0] lane_bad;
- wire data_bad=|lane_bad;
+ // One result per clock: comparison flags and response context advance
+ // together, decoupling the wide checker from telemetry register enables.
+ reg checker_valid,checker_read,checker_last,checker_expected_last;
+ reg [5:0] checker_id;
+ reg [1:0] checker_resp;
+ reg [7:0] checker_bad;
+ reg [32:0] checker_addr;
+ reg [31:0] checker_prefix;
+ reg [255:0] checker_data;
+ wire data_bad=|checker_bad;
  genvar lane,byte_index;
  generate for(lane=0;lane<8;lane=lane+1) begin: lanes
   localparam [2:0] LANE=lane;
@@ -97,37 +106,51 @@ module fk33_hbm_bist #(parameter integer CHANNEL=0)(
   end
   assign lane_bad[lane]=m_rdata[lane*32+:32]!=lane_expected[lane];
  end endgenerate
- // Balanced lowest-index selection. The error flag uses the parallel OR,
- // independently of the metadata priority mux and first-error register data.
- wire [2:0] pair0=lane_bad[0] ? 3'd0 : 3'd1;
- wire [2:0] pair1=lane_bad[2] ? 3'd2 : 3'd3;
- wire [2:0] pair2=lane_bad[4] ? 3'd4 : 3'd5;
- wire [2:0] pair3=lane_bad[6] ? 3'd6 : 3'd7;
- wire [2:0] half0=(|lane_bad[1:0]) ? pair0 : pair1;
- wire [2:0] half1=(|lane_bad[5:4]) ? pair2 : pair3;
- wire [2:0] bad_lane=data_bad ? ((|lane_bad[3:0]) ? half0 : half1) : 3'd0;
- wire [31:0] bad_expected=data_bad ? lane_expected[bad_lane] : 32'b0;
- wire [31:0] bad_actual=data_bad ? m_rdata[bad_lane*32+:32] : 32'b0;
- wire response_error=(b_fire&&((m_bid!=6'd1)||(m_bresp!=0))) ||
-  (r_fire&&((m_rid!=6'd1)||(m_rresp!=0)||
-             (m_rlast!=(beat==beats-1'b1))||data_bad));
+ // Carry full candidate tuples through a balanced priority tree, avoiding
+ // a lane-index decoder followed by another eight-way metadata mux.
+ wire [66:0] candidate[0:7];
+ genvar checked_lane,checked_byte;
+ generate for(checked_lane=0;checked_lane<8;checked_lane=checked_lane+1) begin: checked_lanes
+  localparam [2:0] LANE=checked_lane;
+  wire [31:0] raw_expected=checker_prefix ^ (checked_lane*32'd4) ^
+                           (checked_lane*32'h01020304);
+  wire [31:0] expected;
+  for(checked_byte=0;checked_byte<4;checked_byte=checked_byte+1) begin: bytes
+   assign expected[checked_byte*8+:8]=raw_expected[checked_byte*8+:8] ^
+          {8{masked&&strobe[checked_lane*4+checked_byte]}};
+  end
+  assign candidate[checked_lane]={LANE,expected,checker_data[checked_lane*32+:32]};
+ end endgenerate
+ wire [66:0] pair0=checker_bad[0] ? candidate[0] : candidate[1];
+ wire [66:0] pair1=checker_bad[2] ? candidate[2] : candidate[3];
+ wire [66:0] pair2=checker_bad[4] ? candidate[4] : candidate[5];
+ wire [66:0] pair3=checker_bad[6] ? candidate[6] : candidate[7];
+ wire [66:0] half0=(|checker_bad[1:0]) ? pair0 : pair1;
+ wire [66:0] half1=(|checker_bad[5:4]) ? pair2 : pair3;
+ wire [66:0] first_bad=(|checker_bad[3:0]) ? half0 : half1;
+ wire [2:0] bad_lane=first_bad[66:64];
+ wire [31:0] bad_expected=first_bad[63:32];
+ wire [31:0] bad_actual=first_bad[31:0];
+ wire response_error=checker_valid&&((checker_id!=6'd1)||(checker_resp!=0)||
+  (checker_read&&((checker_last!=checker_expected_last)||data_bad)));
  reg [7:0] event_code;
  reg [32:0] event_addr;
  reg [31:0] event_expected,event_actual;
  always @* begin
-  event_code=0;event_addr=full_beat_addr;event_expected=0;event_actual=0;
-  if(b_fire) begin
-   if(m_bid!=6'd1) begin event_code=1;event_expected=1;event_actual={26'b0,m_bid};end
-   else if(m_bresp!=0) begin event_code=2;event_actual={30'b0,m_bresp};end
-  end
-  if(r_fire) begin
-   if(m_rid!=6'd1) begin event_code=3;event_expected=1;event_actual={26'b0,m_rid};end
-   else if(m_rresp!=0) begin event_code=4;event_actual={30'b0,m_rresp};end
-   else if(m_rlast!=(beat==beats-1'b1)) begin
-    event_code=5;event_expected=beat==beats-1'b1;event_actual=m_rlast;
-   end else if(data_bad) begin
-    event_code=6;event_addr={ADDRESS_TAG,beat_addr[27:5],bad_lane,2'b00};
-    event_expected=bad_expected;event_actual=bad_actual;
+  event_code=0;event_addr=checker_addr;event_expected=0;event_actual=0;
+  if(checker_valid) begin
+   if(!checker_read) begin
+    if(checker_id!=6'd1) begin event_code=1;event_expected=1;event_actual={26'b0,checker_id};end
+    else if(checker_resp!=0) begin event_code=2;event_actual={30'b0,checker_resp};end
+   end else begin
+    if(checker_id!=6'd1) begin event_code=3;event_expected=1;event_actual={26'b0,checker_id};end
+    else if(checker_resp!=0) begin event_code=4;event_actual={30'b0,checker_resp};end
+    else if(checker_last!=checker_expected_last) begin
+     event_code=5;event_expected=checker_expected_last;event_actual=checker_last;
+    end else if(data_bad) begin
+     event_code=6;event_addr={checker_addr[32:5],bad_lane,2'b00};
+     event_expected=bad_expected;event_actual=bad_actual;
+    end
    end
   end
  end
@@ -137,6 +160,8 @@ module fk33_hbm_bist #(parameter integer CHANNEL=0)(
    first_bad_addr<=0;first_bad_expected<=0;first_bad_actual<=0;first_bad_code<=0;
    unit_hi<=0;next_unit_hi<=0;beats<=0;count<=0;seed<=0;strobe<=0;stall<=0;masked<=0;
    beat<=0;unit_index<=0;mask_phase<=0;stop_pending<=0;w_held<=0;aw_done<=0;w_done<=0;
+   checker_valid<=0;checker_read<=0;checker_last<=0;checker_expected_last<=0;
+   checker_id<=0;checker_resp<=0;checker_bad<=0;checker_addr<=0;checker_prefix<=0;checker_data<=0;
   end else if(start) begin
    // Hub sends START to all ports: unselected counters clear without traffic.
    state<=enable ? AW : IDLE;done<=0;stopped<=0;
@@ -145,7 +170,20 @@ module fk33_hbm_bist #(parameter integer CHANNEL=0)(
    unit_hi<=cfg_base[27:9];next_unit_hi<=cfg_base[27:9]+19'd1;beats<=cfg_beats;count<=cfg_count;seed<=cfg_seed;
    strobe<=cfg_strobe;stall<=cfg_stall;masked<=cfg_masked;
    beat<=0;unit_index<=0;mask_phase<=0;stop_pending<=0;w_held<=0;aw_done<=0;w_done<=0;
+   checker_valid<=0;checker_read<=0;checker_last<=0;checker_expected_last<=0;
+   checker_id<=0;checker_resp<=0;checker_bad<=0;checker_addr<=0;checker_prefix<=0;checker_data<=0;
   end else begin
+   checker_valid<=b_fire||r_fire;
+   if(b_fire) begin
+    checker_read<=0;checker_id<=m_bid;checker_resp<=m_bresp;
+    checker_last<=0;checker_expected_last<=0;checker_bad<=0;checker_addr<=full_beat_addr;
+   end
+   if(r_fire) begin
+    checker_read<=1;checker_id<=m_rid;checker_resp<=m_rresp;
+    checker_last<=m_rlast;checker_expected_last<=beat==beats-1'b1;
+    checker_bad<=lane_bad;checker_addr<=full_beat_addr;
+    checker_prefix<=pattern(beat_addr,0,seed);checker_data<=m_rdata;
+   end
    if(busy) cycles<=cycles+1'b1;
    if(busy&&(stop||faulted)) stop_pending<=1;
    if(m_wvalid&&!m_wready) w_held<=1;
@@ -176,17 +214,17 @@ module fk33_hbm_bist #(parameter integer CHANNEL=0)(
     end
     AR:if(ar_fire) begin state<=R;beat<=0;end
     R:if(r_fire) begin
-     // Missing LAST never fabricates drain. Actual terminal responses enter a
-     // busy check boundary so this beat's fault FF commits before unit control.
+     // Missing LAST never fabricates drain. Remain busy until the actual
+     // terminal response's registered checker result commits.
      if(m_rlast) state<=CHECK;
      else if(beat<31) beat<=beat+1'b1;
     end
-    CHECK:begin
-     // Error metadata was captured on the terminal handshake, including an
-     // early/late LAST. Keep the data comparison out of address/counter enables.
-     if(stop_pending||stop||faulted||unit_index==count-1'b1) begin
+    CHECK:if(checker_valid&&checker_read&&checker_last) begin
+     // This terminal result commits on the same edge as completion. Include
+     // its error directly: faulted still holds the preceding beat's value.
+     if(stop_pending||stop||faulted||response_error||unit_index==count-1'b1) begin
       state<=IDLE;done<=1;
-      stopped<=stop_pending||stop||faulted;
+      stopped<=stop_pending||stop||faulted||response_error;
      end else begin
       unit_index<=unit_index+1'b1;
       unit_hi<=next_unit_hi;next_unit_hi<=next_unit_hi+19'd1;

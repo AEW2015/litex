@@ -23,6 +23,7 @@ class HBMBurstBIST(LiteXModule):
         self.ready, self.quiesce_request = ready, quiesce_request
         self.all_drained, self.host_idle = all_drained, host_idle
         self.owner = Signal()
+        self.dispatch_pending = Signal()
         self.busy_mask, self.done_mask = Signal(32), Signal(32)
         self.stopped_mask, self.error_mask = Signal(32), Signal(32)
         self.accepted_start, self.start_rejected, self.config_valid = Signal(), Signal(), Signal()
@@ -64,6 +65,12 @@ class HBMBurstBIST(LiteXModule):
         self._elapsed, self._overlap = Signal(64), Signal(64)
         self._transfer = Signal(32)
         self._transfer_r = Signal(32)
+        # Snapshot validated inputs before the registered engine dispatch. Host
+        # CSR writes while owned cannot change an already accepted operation.
+        self._config = {name: Signal(len(getattr(self, name).storage)) for name in
+            ("mask", "base", "burst_beats", "burst_count", "seed", "strobe", "stall", "masked")}
+        self.sync += If(self.accepted_start, *[
+            value.eq(getattr(self, name).storage) for name, value in self._config.items()])
         request = self.start.re & self.start.storage
         available = (ready & all_drained & host_idle & ~quiesce_request &
                      ~self.owner & (self.busy_mask == 0))
@@ -95,8 +102,9 @@ class HBMBurstBIST(LiteXModule):
         ]
         self.sync += [
             self._transfer_r.eq(self._transfer),
+            self.dispatch_pending.eq(0),
             If(self.accepted_start,
-                self.owner.eq(1), self._active.eq(self.mask.storage),
+                self.owner.eq(1), self.dispatch_pending.eq(1), self._active.eq(self.mask.storage),
                 self._stop_pending.eq(0), self._elapsed.eq(0), self._overlap.eq(0),
                 self.reject.status.eq(0), self._transfer_r.eq(0),
             ).Else(
@@ -105,7 +113,7 @@ class HBMBurstBIST(LiteXModule):
                 If(self.owner, self._elapsed.eq(self._elapsed + 1)),
                 If((self._transfer_r & (self._transfer_r - 1)) != 0,
                     self._overlap.eq(self._overlap + 1)),
-                If(self.owner & (self.busy_mask == 0) & all_drained & host_idle,
+                If(self.owner & ~self.dispatch_pending & (self.busy_mask == 0) & all_drained & host_idle,
                     self.owner.eq(0)),
                 If((self.stop.re & self.stop.storage) | quiesce_request,
                     self._stop_pending.eq(1)),
@@ -168,12 +176,12 @@ class HBMBurstBIST(LiteXModule):
                  (mux_axi.r.valid & mux_axi.r.ready))),
         ]
         parameters = dict(p_CHANNEL=channel, i_clk=ClockSignal("sys"), i_rst=ResetSignal("sys"),
-            i_start=self.accepted_start, i_enable=self.mask.storage[channel],
+            i_start=self.dispatch_pending, i_enable=self._config["mask"][channel],
             i_stop=self._stop_pending | self.quiesce_request | ~self.ready,
-            i_cfg_base=self.base.storage, i_cfg_beats=self.burst_beats.storage,
-            i_cfg_count=self.burst_count.storage, i_cfg_seed=self.seed.storage,
-            i_cfg_strobe=self.strobe.storage, i_cfg_stall=self.stall.storage,
-            i_cfg_masked=self.masked.storage,
+            i_cfg_base=self._config["base"], i_cfg_beats=self._config["burst_beats"],
+            i_cfg_count=self._config["burst_count"], i_cfg_seed=self._config["seed"],
+            i_cfg_strobe=self._config["strobe"], i_cfg_stall=self._config["stall"],
+            i_cfg_masked=self._config["masked"],
             o_busy=busy, o_done=done, o_stopped=stopped, o_faulted=faulted, o_transfer=transfer,
             o_write_beats=metrics["write_beats"], o_read_beats=metrics["read_beats"],
             o_cycles=metrics["cycles"], o_errors=metrics["errors"],
@@ -212,7 +220,8 @@ class HBMBurstBIST(LiteXModule):
         # Busy persists through terminal response consumption and checking.
         # A native B/R terminal response requires all preceding requests to have
         # retired, so no queued BIST request can survive aggregate drain.
-        self.comb += idle.eq(~busy)
+        # Pending dispatch is owned work even before engine busy rises.
+        self.comb += idle.eq(~busy & ~self.dispatch_pending)
         return idle
 
     def get_csrs(self):
