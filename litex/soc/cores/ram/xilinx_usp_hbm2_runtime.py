@@ -59,10 +59,12 @@ class HBMRuntimeQuiesce(LiteXModule):
     """
     CHANNELS = tuple(range(32))
 
-    def __init__(self, platform, channels=CHANNELS, *, registered_request=False):
+    def __init__(self, platform, channels=CHANNELS, *, registered_request=False,
+                 registered_completions=False):
         if tuple(channels) != self.CHANNELS:
             raise ValueError("Runtime interposer requires native channels 0 through 31")
         self.channels = tuple(channels)
+        self.registered_completions = bool(registered_completions)
         path = (Path(__file__).resolve().parent / "xilinx_usp_hbm2" /
                 "fk33_hbm_quiesce.sv")
         if not path.is_file():
@@ -120,6 +122,7 @@ class HBMRuntimeQuiesce(LiteXModule):
             downstream.b.connect(upstream.b),
         ]
         self.specials += Instance("fk33_hbm_quiesce",
+            p_REGISTERED_COMPLETIONS=int(self.registered_completions),
             i_clk=ClockSignal("sys"), i_rst=ResetSignal("sys"),
             i_request=self.quiesce_request & host_idle,
             i_s_arvalid=upstream.ar.valid, i_s_arlen=upstream.ar.len,

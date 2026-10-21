@@ -4,7 +4,8 @@
 // beat prevents drain; software must retain quiesce and report a deadline.
 `timescale 1ns/1ps
 module fk33_hbm_quiesce #(
-    parameter integer MAX_OUTSTANDING = 8
+    parameter integer MAX_OUTSTANDING = 8,
+    parameter integer REGISTERED_COMPLETIONS = 0
 )(
     input wire clk, rst, request,
     input wire s_arvalid, input wire [7:0] s_arlen,
@@ -49,15 +50,30 @@ module fk33_hbm_quiesce #(
     wire r_fire = m_rvalid & s_rready;
     wire r_finish = r_fire & m_rlast;
     wire b_fire = m_bvalid & s_bready;
+    // Optional timing cut on accepted response completion to counter enables.
+    // Payload/READY bypass is unchanged. Counters include any pending retire;
+    // protocol checks subtract that already accepted completion immediately.
+    reg r_pending, b_pending;
+    wire r_retire = REGISTERED_COMPLETIONS ? r_pending : r_finish;
+    wire b_retire = REGISTERED_COMPLETIONS ? b_pending : b_fire;
+    wire no_read_available = reads == 0 ||
+        (REGISTERED_COMPLETIONS && r_pending && reads == 1);
+    wire no_address_available = addresses == 0 ||
+        (REGISTERED_COMPLETIONS && b_pending && addresses == 1);
+    wire no_write_available = writes_completed == 0 ||
+        (REGISTERED_COMPLETIONS && b_pending && writes_completed == 1);
     assign drained = !error && reads == 0 && addresses == 0 &&
         writes_started == 0 && writes_completed == 0 &&
+        !(REGISTERED_COMPLETIONS && (r_pending || b_pending)) &&
         !w_active && !ar_held && !aw_held && !w_held;
 
     always @(posedge clk) begin
         if (rst) begin
             reads<=0; addresses<=0; writes_started<=0; writes_completed<=0;
             ar_held<=0; aw_held<=0; w_held<=0; w_active<=0; error<=0;
+            r_pending<=0; b_pending<=0;
         end else begin
+            r_pending<=r_finish; b_pending<=b_fire;
             if (m_arvalid && !m_arready) ar_held<=1;
             else if (ar_fire) ar_held<=0;
             if (m_awvalid && !m_awready) aw_held<=1;
@@ -68,19 +84,19 @@ module fk33_hbm_quiesce #(
 
             // Counters count transactions, not beats. Completion requires
             // the host to accept the final R beat or B response.
-            case ({ar_fire,r_finish})
+            case ({ar_fire,r_retire})
                 2'b10: reads<=reads+1'b1;
                 2'b01: if (reads!=0) reads<=reads-1'b1;
             endcase
-            case ({aw_fire,b_fire})
+            case ({aw_fire,b_retire})
                 2'b10: addresses<=addresses+1'b1;
                 2'b01: if (addresses!=0) addresses<=addresses-1'b1;
             endcase
-            case ({w_start,b_fire})
+            case ({w_start,b_retire})
                 2'b10: writes_started<=writes_started+1'b1;
                 2'b01: if (writes_started!=0) writes_started<=writes_started-1'b1;
             endcase
-            case ({w_finish,b_fire})
+            case ({w_finish,b_retire})
                 2'b10: writes_completed<=writes_completed+1'b1;
                 2'b01: if (writes_completed!=0) writes_completed<=writes_completed-1'b1;
             endcase
@@ -90,9 +106,9 @@ module fk33_hbm_quiesce #(
             if ((ar_held && !s_arvalid) || (aw_held && !s_awvalid) ||
                 (w_held && !s_wvalid) ||
                 (ar_fire && |s_arlen[7:4]) || (aw_fire && |s_awlen[7:4]) ||
-                (r_fire && reads==0 && !ar_fire) ||
-                (b_fire && ((addresses==0 && !aw_fire) ||
-                            (writes_completed==0 && !w_finish)))) error<=1;
+                (r_fire && no_read_available && !ar_fire) ||
+                (b_fire && ((no_address_available && !aw_fire) ||
+                            (no_write_available && !w_finish)))) error<=1;
         end
     end
 endmodule
