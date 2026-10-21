@@ -53,7 +53,17 @@ class XilinxMultiRegImpl(MultiRegImpl):
             i0, i = i, Signal()
             self.comb += i.eq(i0)
         if len(self.regs):
-            self.regs[0].attr.add("mr_ff")
+            gray_buses = [attribute[1] for attribute in getattr(i, "attr", ())
+                if isinstance(attribute, tuple) and attribute[0] == "hbm_gray_bus"]
+            if gray_buses:
+                if len(gray_buses) != 1 or len(i) != 3 or len(self.regs[0]) != 3:
+                    raise ValueError("HBM Gray timing metadata requires one three-bit pointer bus")
+                # Tagged FIFO pointers receive explicit max-delay/bus-skew
+                # constraints. A generic mr_ff false path would override them.
+                i.attr.add(("hbm_gray_src", gray_buses[0]))
+                self.regs[0].attr.add(("hbm_gray_dst", gray_buses[0]))
+            else:
+                self.regs[0].attr.add("mr_ff")
         for r in self.regs:
             r.attr.add("async_reg")
             r.attr.add("no_shreg_extract")

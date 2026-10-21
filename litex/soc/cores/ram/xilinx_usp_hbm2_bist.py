@@ -7,7 +7,9 @@ CYC drops. STOP/quiesce finishes the current write/masked-write/read unit.
 Counters count accepted AXI beats (32 bytes of bus payload, not enabled bytes).
 """
 from pathlib import Path
-from migen import Cat, ClockSignal, If, Instance, Mux, ResetSignal, Signal
+from migen import Cat, ClockSignal, ClockDomainsRenamer, If, Instance, Mux, ResetSignal, Signal
+from migen.genlib.cdc import MultiReg
+from litex.soc.cores.ram.xilinx_usp_hbm2_runtime import HBMClockMailbox, hbm_status_snapshot
 from migen.genlib.record import DIR_M_TO_S
 from litex.gen import LiteXModule
 from litex.soc.interconnect import axi, stream
@@ -17,7 +19,9 @@ from litex.soc.interconnect.csr import CSRStatus, CSRStorage
 class HBMBurstBIST(LiteXModule):
     CHANNELS = tuple(range(32))
 
-    def __init__(self, platform, ready, quiesce_request, all_drained, host_idle):
+    def __init__(self, platform, ready, quiesce_request, all_drained, host_idle, *, clock_domain="sys"):
+        self.clock_domain = clock_domain
+        native_sync = getattr(self.sync, clock_domain)
         path = Path(__file__).resolve().parent / "xilinx_usp_hbm2" / "fk33_hbm_bist.sv"
         platform.add_source(str(path), language="systemverilog")
         self.ready, self.quiesce_request = ready, quiesce_request
@@ -34,6 +38,8 @@ class HBMBurstBIST(LiteXModule):
         self.engines, self.engine_status = {}, {}
         self.request_buffers, self.response_buffers = {}, {}
         self._csrs = []
+        self._status_pairs = []
+        self.command_pending_sys = Signal()
         def storage(name, width, reset=0):
             value = CSRStorage(width, reset=reset, name=name)
             setattr(self, name, value); self._csrs.append(value)
@@ -41,6 +47,16 @@ class HBMBurstBIST(LiteXModule):
         def status(name, width, attribute=None):
             value = CSRStatus(width, name=name)
             setattr(self, attribute or name, value); self._csrs.append(value)
+            if clock_domain != "sys":
+                value._native_status = Signal(width)
+                shadow = value.status
+                if name == "status":
+                    shadow = Signal(width)
+                    self.comb += value.status.eq(Cat(
+                        shadow[0] | self.command_pending_sys,
+                        shadow[1] | self.command_pending_sys, shadow[2],
+                        shadow[3] & ~self.command_pending_sys, shadow[4:]))
+                self._status_pairs.append((value._native_status, shadow))
             return value
         storage("start", 1)
         storage("stop", 1)
@@ -69,48 +85,117 @@ class HBMBurstBIST(LiteXModule):
         self._transfer_r = Signal(32)
         # Snapshot validated inputs before the registered engine dispatch. Host
         # CSR writes while owned cannot change an already accepted operation.
+        self.error_mask_sys = Signal(32)
+        self.owner_sys = Signal()
+        self.admission_block_sys = Signal()
+        self.command_token_sys = Signal()
+        self.command_token_native = Signal()
+        self.host_barrier_token_native = Signal()
+        self._inputs = {name: getattr(self, name).storage for name in
+            ("mask", "base", "burst_beats", "burst_count", "seed", "strobe", "stall", "masked")}
+        start_request = self.start.re & self.start.storage
+        stop_request = self.stop.re & self.stop.storage
+        if clock_domain != "sys":
+            # SYS captures the whole command before closing admission. Native
+            # dispatch waits for the board's round-trip blocked+idle barrier.
+            self.command_mailbox = HBMClockMailbox(sum(len(v) for v in self._inputs.values()), "sys", clock_domain)
+            self.comb += [self.command_token_sys.eq(self.command_mailbox.source_epoch),
+                          self.command_token_native.eq(self.command_mailbox.destination_epoch),
+                          self.command_mailbox.data.eq(Cat(*self._inputs.values())),
+                          self.command_mailbox.send.eq(start_request & ~self.command_pending_sys)]
+            offset = 0
+            for name, value in list(self._inputs.items()):
+                self._inputs[name] = self.command_mailbox.output[offset:offset + len(value)]
+                offset += len(value)
+            native_pending = Signal()
+            finish_toggle, finish_sys = Signal(), Signal()
+            finish_seen, finish_snapshot_sys = Signal(), Signal()
+            self._status_pairs.append((finish_toggle, finish_snapshot_sys))
+            self.specials += [MultiReg(self.owner, self.owner_sys, "sys"),
+                              MultiReg(finish_toggle, finish_sys, "sys")]
+            self.sync += [
+                If(start_request & ~self.command_pending_sys,
+                    self.command_pending_sys.eq(1)),
+                If((finish_sys != finish_seen) & (finish_snapshot_sys == finish_sys),
+                    finish_seen.eq(finish_sys), self.command_pending_sys.eq(0)),
+            ]
+            # Hold SYS admission through the full owned operation, even if a
+            # short native owner pulse falls between SYS sampling edges.
+            self.comb += self.admission_block_sys.eq(self.command_pending_sys | self.owner_sys | start_request)
+            native_sync += [
+                If(self.command_mailbox.update, native_pending.eq(1)),
+                If(native_pending & (self.accepted_start | self.start_rejected),
+                    native_pending.eq(0)),
+                If(self.start_rejected | self.release_owner,
+                    finish_toggle.eq(~finish_toggle)),
+            ]
+            # A retained STOP level cannot disappear between unrelated clocks.
+            stop_latched, stop_native = Signal(), Signal()
+            self.sync += If(stop_request, stop_latched.eq(1)).Elif(
+                start_request & ~self.command_pending_sys, stop_latched.eq(0))
+            self.specials += MultiReg(stop_latched, stop_native, clock_domain)
+            stop_request = stop_native
+            start_request = native_pending
+        else:
+            self.comb += [self.owner_sys.eq(self.owner),
+                          self.admission_block_sys.eq(self.owner)]
+        if clock_domain != "sys":
+            self.comb += self.error_mask_sys.eq(self._error_csr.status)
+            # Append-only CDC diagnostics preserve the established CSR layout.
+            self.command_overrun = CSRStatus(1, name="command_overrun")
+            self.snapshot_sequence = CSRStatus(32, name="snapshot_sequence")
+            self._cdc_csrs = [self.command_overrun, self.snapshot_sequence]
+            self.sync += If(self.start.re & self.start.storage & self.command_pending_sys,
+                            self.command_overrun.status.eq(1))
+        else:
+            self.comb += self.error_mask_sys.eq(self.error_mask)
         self._config = {name: Signal(len(getattr(self, name).storage)) for name in
             ("mask", "base", "burst_beats", "burst_count", "seed", "strobe", "stall", "masked")}
-        self.sync += If(self.accepted_start, *[
-            value.eq(getattr(self, name).storage) for name, value in self._config.items()])
-        request = self.start.re & self.start.storage
-        available = (ready & all_drained & host_idle & ~quiesce_request &
+        native_sync += If(self.accepted_start, *[
+            value.eq(self._inputs[name]) for name, value in self._config.items()])
+        request = start_request
+        barrier_current = ((self.host_barrier_token_native == self.command_token_native)
+                           if clock_domain != "sys" else 1)
+        cancelled_start = stop_request if clock_domain != "sys" else 0
+        available = (~cancelled_start & ready & all_drained & host_idle & barrier_current & ~quiesce_request &
                      ~self.owner & (self.busy_mask == 0))
         # Aligned 512-byte units and 1..16 beats make the final-byte bound
         # equivalent to base_units + count <= 0x80000. Bound all 32 count bits
         # separately before using the narrow sum; invalid high bits cannot wrap.
         end_unit = Signal(21)
         self.comb += [
-            end_unit.eq(self.base.storage[9:] + self.burst_count.storage[:20]),
-            self.config_valid.eq((self.mask.storage != 0) &
-                (self.base.storage[:9] == 0) &
-                (self.burst_beats.storage >= 1) & (self.burst_beats.storage <= 16) &
-                (self.burst_count.storage >= 1) & (self.burst_count.storage <= 0x80000) &
+            end_unit.eq(self._inputs["base"][9:] + self._inputs["burst_count"][:20]),
+            self.config_valid.eq((self._inputs["mask"] != 0) &
+                (self._inputs["base"][:9] == 0) &
+                (self._inputs["burst_beats"] >= 1) & (self._inputs["burst_beats"] <= 16) &
+                (self._inputs["burst_count"] >= 1) & (self._inputs["burst_count"] <= 0x80000) &
                 (end_unit <= 0x80000)),
             self.accepted_start.eq(request & available & self.config_valid),
             self.release_owner.eq(self.owner & ~self.dispatch_pending &
                 (self.busy_mask == 0) & all_drained & host_idle),
-            self.start_rejected.eq(request & ~self.accepted_start),
-            self._busy_csr.status.eq(self.busy_mask),
-            self._done_csr.status.eq(self.done_mask),
-            self._stopped_csr.status.eq(self.stopped_mask),
-            self._error_csr.status.eq(self.error_mask),
-            self.elapsed.status.eq(self._elapsed),
-            self.overlap_cycles.status.eq(self._overlap),
-            self.transfer_mask.status.eq(self._transfer_r),
-            self.active_mask.status.eq(self._active),
-            self.status.status.eq(Cat(self.owner, self.busy_mask != 0,
+            self.start_rejected.eq(request & ~self.accepted_start &
+                (((~ready) | quiesce_request | cancelled_start | self.owner | (self.busy_mask != 0) | ~self.config_valid)
+                 if clock_domain != "sys" else 1)),
+            self._native(self._busy_csr).eq(self.busy_mask),
+            self._native(self._done_csr).eq(self.done_mask),
+            self._native(self._stopped_csr).eq(self.stopped_mask),
+            self._native(self._error_csr).eq(self.error_mask),
+            self._native(self.elapsed).eq(self._elapsed),
+            self._native(self.overlap_cycles).eq(self._overlap),
+            self._native(self.transfer_mask).eq(self._transfer_r),
+            self._native(self.active_mask).eq(self._active),
+            self._native(self.status).eq(Cat(self.owner, self.busy_mask != 0,
                 self.error_mask != 0,
                 (self._active != 0) & ((self.done_mask & self._active) == self._active),
                 self._stop_pending, self.config_valid)),
         ]
-        self.sync += [
+        native_sync += [
             self._transfer_r.eq(self._transfer),
             self.dispatch_pending.eq(0),
             If(self.accepted_start,
-                self.owner.eq(1), self.dispatch_pending.eq(1), self._active.eq(self.mask.storage),
+                self.owner.eq(1), self.dispatch_pending.eq(1), self._active.eq(self._inputs["mask"]),
                 self._stop_pending.eq(0), self._elapsed.eq(0), self._overlap.eq(0),
-                self.reject.status.eq(0), self._transfer_r.eq(0),
+                self._native(self.reject).eq(0), self._transfer_r.eq(0),
             ).Else(
                 # Global elapsed includes ownership drain overhead, from the
                 # accepted start until all engines and native trackers retire.
@@ -119,12 +204,12 @@ class HBMBurstBIST(LiteXModule):
                     self._overlap.eq(self._overlap + 1)),
                 If(self.release_owner,
                     self.owner.eq(0)),
-                If((self.stop.re & self.stop.storage) | quiesce_request,
+                If(stop_request | quiesce_request,
                     self._stop_pending.eq(1)),
                 If(self.start_rejected,
-                    If(self.owner | (self.busy_mask != 0), self.reject.status.eq(1))
-                    .Elif(~self.config_valid, self.reject.status.eq(2))
-                    .Else(self.reject.status.eq(3))),
+                    If(self.owner | (self.busy_mask != 0), self._native(self.reject).eq(1))
+                    .Elif(~self.config_valid, self._native(self.reject).eq(2))
+                    .Else(self._native(self.reject).eq(3))),
             ),
         ]
 
@@ -136,12 +221,13 @@ class HBMBurstBIST(LiteXModule):
                 raise ValueError("BIST ownership requires AXI256/address33/ID6")
             if interface.version != "axi4":
                 raise ValueError("BIST uses the ordered-write AXI4 shape of the HBM AXI3 subset")
+        native_sync = getattr(self.sync, self.clock_domain)
         # Same-edge copies of global ownership, protected from equivalence
         # merging so each native mux has a local select driver.
         local_owner = Signal(name=f"hbm_bist_pc{channel:02d}_owner",
             attr={("DONT_TOUCH", "TRUE")})
         self.local_owners[channel] = local_owner
-        self.sync += If(self.accepted_start, local_owner.eq(1)).Elif(
+        native_sync += If(self.accepted_start, local_owner.eq(1)).Elif(
             self.release_owner, local_owner.eq(0))
         engine = axi.AXIInterface(data_width=256, address_width=33, id_width=6)
         self.engines[channel] = engine
@@ -152,6 +238,8 @@ class HBMBurstBIST(LiteXModule):
         for group in ("aw", "w", "ar"):
             request = getattr(engine, group)
             buffer = stream.Buffer(request.description, pipe_valid=True, pipe_ready=True)
+            if self.clock_domain != "sys":
+                buffer = ClockDomainsRenamer(self.clock_domain)(buffer)
             self.submodules += buffer
             self.request_buffers[channel][group] = buffer
             self.comb += request.connect(buffer.sink)
@@ -160,6 +248,8 @@ class HBMBurstBIST(LiteXModule):
         for group in ("b", "r"):
             response = getattr(mux_engine, group)
             buffer = stream.Buffer(response.description, pipe_valid=True, pipe_ready=True)
+            if self.clock_domain != "sys":
+                buffer = ClockDomainsRenamer(self.clock_domain)(buffer)
             self.submodules += buffer
             self.response_buffers[channel][group] = buffer
             self.comb += response.connect(buffer.sink)
@@ -174,7 +264,11 @@ class HBMBurstBIST(LiteXModule):
         csrs = []
         for name, value in metrics.items():
             csr = CSRStatus(len(value), name=f"pc{channel:02d}_{name}")
-            csrs.append(csr); self.comb += csr.status.eq(value)
+            csrs.append(csr)
+            if self.clock_domain != "sys":
+                self._status_pairs.append((value, csr.status))
+            else:
+                self.comb += csr.status.eq(value)
         self._port_csrs[channel] = csrs
         self.comb += [
             self.busy_mask[channel].eq(busy), self.done_mask[channel].eq(done),
@@ -186,7 +280,7 @@ class HBMBurstBIST(LiteXModule):
                 ((mux_axi.w.valid & mux_axi.w.ready) |
                  (mux_axi.r.valid & mux_axi.r.ready))),
         ]
-        parameters = dict(p_CHANNEL=channel, i_clk=ClockSignal("sys"), i_rst=ResetSignal("sys"),
+        parameters = dict(p_CHANNEL=channel, i_clk=ClockSignal(self.clock_domain), i_rst=ResetSignal(self.clock_domain),
             i_start=self.dispatch_pending, i_enable=self._config["mask"][channel],
             i_stop=self._stop_pending | self.quiesce_request | ~self.ready,
             i_cfg_base=self._config["base"], i_cfg_beats=self._config["burst_beats"],
@@ -235,10 +329,18 @@ class HBMBurstBIST(LiteXModule):
         self.comb += idle.eq(~busy & ~self.dispatch_pending)
         return idle
 
+    @staticmethod
+    def _native(csr):
+        return getattr(csr, "_native_status", csr.status)
+
     def get_csrs(self):
         return self._csrs + [csr for channel in sorted(self._port_csrs)
-                            for csr in self._port_csrs[channel]]
+                            for csr in self._port_csrs[channel]] + getattr(self, "_cdc_csrs", [])
 
     def do_finalize(self):
+        if self.clock_domain != "sys":
+            mailbox = hbm_status_snapshot(self, self._status_pairs, self.clock_domain)
+            self.sync += If(mailbox.update,
+                            self.snapshot_sequence.status.eq(self.snapshot_sequence.status + 1))
         if set(self._ports) != set(self.CHANNELS):
             raise ValueError("BIST ownership must connect all 32 physical ports")

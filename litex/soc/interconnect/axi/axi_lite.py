@@ -616,7 +616,7 @@ class AXILiteConverter(LiteXModule):
 
 class AXILiteClockDomainCrossing(LiteXModule):
     """AXILite Clock Domain Crossing"""
-    def __init__(self, master, slave, cd_from="sys", cd_to="sys"):
+    def __init__(self, master, slave, cd_from="sys", cd_to="sys", gray_bus_prefix=None):
         # Same Clock Domain, direct connection.
         if cd_from == cd_to:
             self.comb += [
@@ -630,10 +630,12 @@ class AXILiteClockDomainCrossing(LiteXModule):
             ]
         # Clock Domain Crossing.
         else:
+            def gray_prefix(channel):
+                return None if gray_bus_prefix is None else f"{gray_bus_prefix}_{channel}"
             # Write.
-            aw_cdc = stream.ClockDomainCrossing(master.aw.description, cd_from,   cd_to)
-            w_cdc  = stream.ClockDomainCrossing(master.w.description,  cd_from,   cd_to)
-            b_cdc  = stream.ClockDomainCrossing(master.b.description,    cd_to, cd_from)
+            aw_cdc = stream.ClockDomainCrossing(master.aw.description, cd_from,   cd_to, gray_bus_prefix=gray_prefix("aw"))
+            w_cdc  = stream.ClockDomainCrossing(master.w.description,  cd_from,   cd_to, gray_bus_prefix=gray_prefix("w"))
+            b_cdc  = stream.ClockDomainCrossing(master.b.description,    cd_to, cd_from, gray_bus_prefix=gray_prefix("b"))
             self.submodules += aw_cdc, w_cdc, b_cdc
             self.comb += [
                 master.aw.connect(aw_cdc.sink),
@@ -644,8 +646,8 @@ class AXILiteClockDomainCrossing(LiteXModule):
                 b_cdc.source.connect(master.b),
             ]
             # Read.
-            ar_cdc = stream.ClockDomainCrossing(master.ar.description, cd_from,   cd_to)
-            r_cdc  = stream.ClockDomainCrossing(master.r.description,    cd_to, cd_from)
+            ar_cdc = stream.ClockDomainCrossing(master.ar.description, cd_from,   cd_to, gray_bus_prefix=gray_prefix("ar"))
+            r_cdc  = stream.ClockDomainCrossing(master.r.description,    cd_to, cd_from, gray_bus_prefix=gray_prefix("r"))
             self.submodules += ar_cdc, r_cdc
             self.comb += [
                 master.ar.connect(ar_cdc.sink),

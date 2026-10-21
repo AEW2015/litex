@@ -321,7 +321,9 @@ MANAGEMENT_REGISTERS = (
 class PrimitiveHBM2(USPHBM2):
     """Bind the maintained primitive/control RTL to LiteX interfaces.
 
-    The target maps the ``axi`` clock domain to its 250 MHz system domain.
+    The target can map ``axi`` to SYS or provide a separate 250 MHz domain.
+    ``memory_ready`` is SYS-facing; ``memory_ready_axi`` is synchronized for
+    native admission and does not reset the AXI-domain control state.
     ``control_bus`` is a raw 32-bit, 14-bit word-addressed CSR interface. It
     must be connected to the SoC's CSR interconnect without a second CSR bank
     decoder: the control RTL already selects bank 6 and registers responses.
@@ -376,6 +378,8 @@ class PrimitiveHBM2(USPHBM2):
         self.sw_ready = Signal(2, name="hbm_sw_ready")
         self.memory_ready = Signal(name="hbm_memory_ready")
         self.comb += self.memory_ready.eq(self.sw_ready == 3)
+        self.memory_ready_axi = Signal(name="hbm_memory_ready_axi")
+        self.specials += MultiReg(self.memory_ready, self.memory_ready_axi, "axi")
         self.sw_temperature = [Signal(7, name=f"hbm_sw_temperature_{i}") for i in range(2)]
         self.sw_temperature_valid = Signal(2, name="hbm_sw_temperature_valid")
         self.raw_temperature = [Signal(3, name=f"hbm_raw_temperature_{i}") for i in range(2)]

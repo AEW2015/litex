@@ -6,9 +6,62 @@ resets, APB, or clocks.
 """
 from pathlib import Path
 
-from migen import Cat, ClockSignal, If, Instance, ResetSignal, Signal
+from migen import Cat, ClockSignal, If, Instance, Mux, ResetSignal, Signal
+from migen.genlib.cdc import MultiReg
 from litex.gen import LiteXModule
 from litex.soc.interconnect.csr import CSRStatus, CSRStorage
+
+
+class HBMClockMailbox(LiteXModule):
+    """One outstanding bundled-data transfer, acknowledged after capture.
+
+    Only toggle controls pass through synchronizers. The source payload is
+    held from launch through the returned acknowledgement, including two
+    destination clocks before capture. Both domains must share system reset;
+    READY withdrawal must not reset either mailbox endpoint independently.
+    """
+    def __init__(self, width, source, destination):
+        self.data = Signal(width)
+        self.send = Signal()
+        self.busy = Signal()
+        self.output = Signal(width)
+        self.update = Signal()
+        held = Signal(width)
+        request, acknowledge = Signal(), Signal()
+        request_d, acknowledge_s = Signal(), Signal()
+        self.specials += [MultiReg(request, request_d, destination),
+                          MultiReg(acknowledge, acknowledge_s, source)]
+        self.source_epoch = request
+        self.destination_epoch = acknowledge
+        self.comb += self.busy.eq(request != acknowledge_s)
+        source_sync = getattr(self.sync, source)
+        destination_sync = getattr(self.sync, destination)
+        source_sync += If(self.send & ~self.busy,
+            held.eq(self.data), request.eq(~request))
+        destination_sync += [
+            self.update.eq(0),
+            If(request_d != acknowledge,
+                self.output.eq(held), self.update.eq(1),
+                acknowledge.eq(request_d)),
+        ]
+
+
+def hbm_status_snapshot(module, pairs, source):
+    """Continuously capture an atomic native bundle into SYS shadows.
+
+    A sequence counter permits software to retry multiword reads while busy.
+    Counters remain stable after ownership is released, as in the original ABI.
+    """
+    mailbox = HBMClockMailbox(sum(len(native) for native, _ in pairs), source, "sys")
+    module.submodules += mailbox
+    module.comb += [mailbox.data.eq(Cat(*[native for native, _ in pairs])),
+                    mailbox.send.eq(~mailbox.busy)]
+    offset = 0
+    for native, shadow in pairs:
+        module.sync += If(mailbox.update,
+                          shadow.eq(mailbox.output[offset:offset + len(native)]))
+        offset += len(native)
+    return mailbox
 
 
 class WishboneAdmissionGate(LiteXModule):
@@ -56,13 +109,19 @@ class HBMRuntimeQuiesce(LiteXModule):
     faults (such as a rejected bank-selector change) contribute to status bit
     2 and hold admission closed. Per-port AXI accounting faults remain visible
     in the error vector. All faults are sticky until system reset.
+
+    Separate-domain mode keeps CSRs in SYS. STOP completion requires the
+    current request generation, the board admission/idle barrier and a coherent
+    returned native snapshot. An open idle observation does not require STOP.
     """
     CHANNELS = tuple(range(32))
 
     def __init__(self, platform, channels=CHANNELS, *, registered_request=False,
-                 registered_completions=False):
+                 registered_completions=False, clock_domain="sys", sys_host_idle=None):
         if tuple(channels) != self.CHANNELS:
             raise ValueError("Runtime interposer requires native channels 0 through 31")
+        self.clock_domain = clock_domain
+        native_sync = getattr(self.sync, clock_domain)
         self.channels = tuple(channels)
         self.registered_request = bool(registered_request)
         self.registered_completions = bool(registered_completions)
@@ -86,6 +145,67 @@ class HBMRuntimeQuiesce(LiteXModule):
         self.all_drained = Signal()
         self.external_fault = Signal()
         self._ports = set()
+        self.native_quiesce_request = Signal()
+        self.native_all_drained = Signal()
+        self.native_quiesced = Signal()
+        self._native_drained, self._native_error = Signal(32), Signal(32)
+        self._native_fault = Signal()
+        self.request_generation_sys = Signal(32)
+        self.request_generation_native = Signal(32)
+        self.host_barrier_generation_native = Signal(32)
+        if sys_host_idle is None:
+            sys_host_idle = 1
+        self._quiesced_sys = Signal()
+        self._all_drained_sys = Signal()
+        if clock_domain != "sys":
+            # Each SYS request transition advances the generation, even if it
+            # occurs while a prior mailbox is busy. A rapid 1/0/1 sequence must
+            # never reuse the drained snapshot from the preceding STOP.
+            self.request_mailbox = HBMClockMailbox(33, "sys", clock_domain)
+            observed_request = Signal()
+            generation, sent_generation, snapshot_generation = Signal(32), Signal(32), Signal(32)
+            self.request_generation = generation
+            self.comb += [self.request_generation_sys.eq(generation),
+                          self.request_generation_native.eq(self.request_mailbox.output[1:])]
+            self.request_acknowledged = Signal()
+            drained_snapshot = Signal(32)
+            self.comb += [
+                self.drained.status.eq(Mux(self.request_acknowledged & sys_host_idle, drained_snapshot, 0)),
+                self.request_mailbox.data.eq(Cat(self.quiesce_request, generation)),
+                self.request_mailbox.send.eq(generation != sent_generation),
+                self.native_quiesce_request.eq(self.request_mailbox.output[0]),
+                self.request_acknowledged.eq(~self.request_mailbox.busy &
+                    (observed_request == self.quiesce_request) &
+                    (sent_generation == generation) & (snapshot_generation == generation)),
+            ]
+            self.sync += [
+                If(observed_request != self.quiesce_request,
+                    observed_request.eq(self.quiesce_request), generation.eq(generation + 1)),
+                If(self.request_mailbox.send & ~self.request_mailbox.busy,
+                    sent_generation.eq(generation)),
+            ]
+            self.specials += MultiReg(self.external_fault, self._native_fault, clock_domain)
+            hbm_status_snapshot(self, [(self._native_drained, drained_snapshot),
+                                      (self._native_error, self.error.status),
+                                      (self.native_quiesced, self._quiesced_sys),
+                                      (self.native_all_drained, self._all_drained_sys),
+                                      (self.request_mailbox.output[1:], snapshot_generation)], clock_domain)
+        else:
+            self.request_acknowledged = Signal(reset=1)
+            self.comb += [self.native_quiesce_request.eq(self.quiesce_request),
+                          self._native_fault.eq(self.external_fault),
+                          self._quiesced_sys.eq(self.native_quiesced),
+                          self._all_drained_sys.eq(self.native_all_drained),
+                          self.drained.status.eq(self._native_drained),
+                          self.error.status.eq(self._native_error)]
+        self.comb += [
+            self.native_all_drained.eq((self._native_drained == 0xffffffff) &
+                ((~self.native_quiesce_request |
+                  (self.host_barrier_generation_native == self.request_generation_native))
+                 if clock_domain != "sys" else 1)),
+            self.native_quiesced.eq(self.native_quiesce_request & self.native_all_drained &
+                                    (self._native_error == 0) & ~self._native_fault),
+        ]
         raw_request = Signal()
         self.comb += raw_request.eq(self.request.storage |
                                    (self.error.status != 0) | self.external_fault)
@@ -97,8 +217,8 @@ class HBMRuntimeQuiesce(LiteXModule):
         else:
             self.comb += self.quiesce_request.eq(raw_request)
         self.comb += [
-            self.all_drained.eq(self.drained.status == 0xffffffff),
-            self.quiesced.eq(self.quiesce_request & self.all_drained &
+            self.all_drained.eq(self._all_drained_sys & (self.drained.status == 0xffffffff) & self.request_acknowledged & sys_host_idle),
+            self.quiesced.eq(self.quiesce_request & self._quiesced_sys & self.all_drained &
                              (self.error.status == 0) & ~self.external_fault),
             self.status.status.eq(Cat(self.quiesce_request, self.all_drained,
                                       (self.error.status != 0) | self.external_fault)),
@@ -113,14 +233,15 @@ class HBMRuntimeQuiesce(LiteXModule):
             if interface.version != "axi4":
                 raise ValueError("The FK33 mapping uses the ordered-write AXI4 shape of the AXI3 subset")
         self._ports.add(channel)
+        native_sync = getattr(self.sync, self.clock_domain)
         native_drained = Signal(name=f"hbm_pc{channel}_axi_drained")
         port_request = Signal(name=f"hbm_pc{channel}_quiesce_request")
         if self.registered_request:
-            self.sync += port_request.eq(self.quiesce_request & host_idle)
+            native_sync += port_request.eq(self.native_quiesce_request & host_idle)
         else:
-            self.comb += port_request.eq(self.quiesce_request & host_idle)
+            self.comb += port_request.eq(self.native_quiesce_request & host_idle)
         self.comb += [
-            self.drained.status[channel].eq(native_drained & host_idle),
+            self._native_drained[channel].eq(native_drained & host_idle),
             upstream.ar.connect(downstream.ar, omit={"valid", "ready"}),
             upstream.aw.connect(downstream.aw, omit={"valid", "ready"}),
             upstream.w.connect(downstream.w, omit={"valid", "ready"}),
@@ -129,7 +250,7 @@ class HBMRuntimeQuiesce(LiteXModule):
         ]
         self.specials += Instance("fk33_hbm_quiesce",
             p_REGISTERED_COMPLETIONS=int(self.registered_completions),
-            i_clk=ClockSignal("sys"), i_rst=ResetSignal("sys"),
+            i_clk=ClockSignal(self.clock_domain), i_rst=ResetSignal(self.clock_domain),
             i_request=port_request,
             i_s_arvalid=upstream.ar.valid, i_s_arlen=upstream.ar.len,
             o_s_arready=upstream.ar.ready, o_m_arvalid=downstream.ar.valid,
@@ -143,7 +264,7 @@ class HBMRuntimeQuiesce(LiteXModule):
             i_m_rvalid=downstream.r.valid, i_m_rlast=downstream.r.last,
             i_s_rready=upstream.r.ready,
             i_m_bvalid=downstream.b.valid, i_s_bready=upstream.b.ready,
-            o_drained=native_drained, o_error=self.error.status[channel])
+            o_drained=native_drained, o_error=self._native_error[channel])
 
     def do_finalize(self):
         if self._ports != set(self.channels):

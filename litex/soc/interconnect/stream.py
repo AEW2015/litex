@@ -270,7 +270,7 @@ class SyncFIFO(_FIFOWrapper):
 
 
 class AsyncFIFO(_FIFOWrapper):
-    def __init__(self, layout, depth=None, buffered=False):
+    def __init__(self, layout, depth=None, buffered=False, gray_bus_prefix=None):
         depth = 4 if depth is None else depth
         assert depth >= 4
         _FIFOWrapper.__init__(self,
@@ -278,11 +278,27 @@ class AsyncFIFO(_FIFOWrapper):
             layout     = layout,
             depth      = depth
         )
+        if gray_bus_prefix is not None:
+            # Explicit timing metadata for the qualified four-entry HBM CDC.
+            # Keep this narrow dependency on Migen's AsyncFIFO implementation
+            # here, rather than making board code inspect private module trees.
+            if depth != 4 or not isinstance(gray_bus_prefix, str) or not gray_bus_prefix:
+                raise ValueError("Gray-bus tagging requires depth four and a nonempty prefix")
+            native = self.fifo.fifo if buffered else self.fifo
+            pointers = [special for special in native._fragment.specials
+                if isinstance(special, MultiReg)]
+            if len(pointers) != 2 or {pointer.odomain for pointer in pointers} != {"read", "write"}:
+                raise ValueError("Migen AsyncFIFO must contain its two Gray-pointer synchronizers")
+            for pointer in pointers:
+                if not isinstance(pointer.i, Signal) or len(pointer.i) != 3 or len(pointer.o) != 3:
+                    raise ValueError("Four-entry FIFO Gray pointers must be three-bit signals")
+                name = "produce" if pointer.odomain == "read" else "consume"
+                pointer.i.attr.add(("hbm_gray_bus", f"{gray_bus_prefix}_{name}"))
 
 # ClockDomainCrossing ------------------------------------------------------------------------------
 
 class ClockDomainCrossing(LiteXModule, DUID):
-    def __init__(self, layout, cd_from="sys", cd_to="sys", depth=None, buffered=False, with_common_rst=False):
+    def __init__(self, layout, cd_from="sys", cd_to="sys", depth=None, buffered=False, with_common_rst=False, gray_bus_prefix=None):
         DUID.__init__(self)
         self.sink   = Endpoint(layout)
         self.source = Endpoint(layout)
@@ -324,7 +340,7 @@ class ClockDomainCrossing(LiteXModule, DUID):
                 ]
 
             # Add Asynchronous FIFO
-            cdc = AsyncFIFO(layout, depth, buffered=buffered)
+            cdc = AsyncFIFO(layout, depth, buffered=buffered, gray_bus_prefix=gray_bus_prefix)
             cdc = ClockDomainsRenamer({"write": cd_from, "read": cd_to})(cdc)
             self.submodules += cdc
 
