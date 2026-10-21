@@ -1676,7 +1676,10 @@ class SoC(LiteXModule):
         return hyperram
 
     # Add CSR Bridge -------------------------------------------------------------------------------
-    def add_csr_bridge(self, name="csr", origin=None, with_register=False):
+    def add_csr_bridge(self, name="csr", origin=None, with_register=False, read_latency=1):
+        if read_latency != 1 and self.bus.standard != "wishbone":
+            raise ValueError("CSR read latency is configurable only with a Wishbone bridge")
+        bridge_kwargs = {"read_latency": read_latency} if read_latency != 1 else {}
         csr_bridge_cls = {
             "wishbone": wishbone.Wishbone2CSR,
             "axi-lite": axi.AXILite2CSR,
@@ -1701,7 +1704,7 @@ class SoC(LiteXModule):
                 address_width = self.csr.address_width,
                 data_width    = data_width,
                 alignment     = self.csr.alignment),
-            register = with_register)
+            register = with_register, **bridge_kwargs)
         self.logger.info("CSR Bridge {} {}.".format(
             colorer(name, color="underline"),
             colorer("added", color="green")))
