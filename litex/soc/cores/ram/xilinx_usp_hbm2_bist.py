@@ -25,7 +25,6 @@ class HBMBurstBIST(LiteXModule):
         self.owner = Signal()
         self.release_owner = Signal()
         self.local_owners = {}
-        self.csr_read_pipeline = True
         self.dispatch_pending = Signal()
         self.busy_mask, self.done_mask = Signal(32), Signal(32)
         self.stopped_mask, self.error_mask = Signal(32), Signal(32)
