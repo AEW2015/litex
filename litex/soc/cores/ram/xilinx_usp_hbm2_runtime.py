@@ -64,6 +64,7 @@ class HBMRuntimeQuiesce(LiteXModule):
         if tuple(channels) != self.CHANNELS:
             raise ValueError("Runtime interposer requires native channels 0 through 31")
         self.channels = tuple(channels)
+        self.registered_request = bool(registered_request)
         self.registered_completions = bool(registered_completions)
         path = (Path(__file__).resolve().parent / "xilinx_usp_hbm2" /
                 "fk33_hbm_quiesce.sv")
@@ -91,7 +92,7 @@ class HBMRuntimeQuiesce(LiteXModule):
         # Optional global fanout cut. Local tracker errors still stop their
         # own port immediately; only cross-port/software requests gain a cycle.
         # Raw faults remain visible and prohibit a successful quiesced result.
-        if registered_request:
+        if self.registered_request:
             self.sync += self.quiesce_request.eq(raw_request)
         else:
             self.comb += self.quiesce_request.eq(raw_request)
@@ -113,6 +114,11 @@ class HBMRuntimeQuiesce(LiteXModule):
                 raise ValueError("The FK33 mapping uses the ordered-write AXI4 shape of the AXI3 subset")
         self._ports.add(channel)
         native_drained = Signal(name=f"hbm_pc{channel}_axi_drained")
+        port_request = Signal(name=f"hbm_pc{channel}_quiesce_request")
+        if self.registered_request:
+            self.sync += port_request.eq(self.quiesce_request & host_idle)
+        else:
+            self.comb += port_request.eq(self.quiesce_request & host_idle)
         self.comb += [
             self.drained.status[channel].eq(native_drained & host_idle),
             upstream.ar.connect(downstream.ar, omit={"valid", "ready"}),
@@ -124,7 +130,7 @@ class HBMRuntimeQuiesce(LiteXModule):
         self.specials += Instance("fk33_hbm_quiesce",
             p_REGISTERED_COMPLETIONS=int(self.registered_completions),
             i_clk=ClockSignal("sys"), i_rst=ResetSignal("sys"),
-            i_request=self.quiesce_request & host_idle,
+            i_request=port_request,
             i_s_arvalid=upstream.ar.valid, i_s_arlen=upstream.ar.len,
             o_s_arready=upstream.ar.ready, o_m_arvalid=downstream.ar.valid,
             i_m_arready=downstream.ar.ready,
