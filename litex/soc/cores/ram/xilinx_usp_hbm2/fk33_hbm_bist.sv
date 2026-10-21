@@ -39,14 +39,16 @@ module fk33_hbm_bist #(parameter integer CHANNEL=0)(
  localparam [4:0] ADDRESS_TAG=5'd4+(CHANNEL%4);
  reg [2:0] state;
  reg [18:0] unit_hi,next_unit_hi;
- reg [4:0] beats,beat;
- reg [31:0] count,unit_index;
+ reg [4:0] beat;
+ reg [31:0] unit_index;
  // Keep these captured configuration FFs local to each engine. Otherwise
  // equivalent registers merge across ports and route into remote checkers.
+ (* DONT_TOUCH = "TRUE" *) reg [31:0] count;
+ (* DONT_TOUCH = "TRUE" *) reg [4:0] beats;
+ (* DONT_TOUCH = "TRUE" *) reg [2:0] stall;
  (* DONT_TOUCH = "TRUE" *) reg [31:0] seed;
  (* DONT_TOUCH = "TRUE" *) reg [31:0] strobe;
  (* DONT_TOUCH = "TRUE" *) reg masked;
- reg [2:0] stall;
  reg mask_phase,stop_pending,w_held,aw_done,w_done;
  // Accepted bases are 512-byte aligned. Register the unit address so the
  // per-beat checker has no unit-index/address carry chain. next_unit_hi also

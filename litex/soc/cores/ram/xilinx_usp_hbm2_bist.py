@@ -23,6 +23,9 @@ class HBMBurstBIST(LiteXModule):
         self.ready, self.quiesce_request = ready, quiesce_request
         self.all_drained, self.host_idle = all_drained, host_idle
         self.owner = Signal()
+        self.release_owner = Signal()
+        self.local_owners = {}
+        self.csr_read_pipeline = True
         self.dispatch_pending = Signal()
         self.busy_mask, self.done_mask = Signal(32), Signal(32)
         self.stopped_mask, self.error_mask = Signal(32), Signal(32)
@@ -86,6 +89,8 @@ class HBMBurstBIST(LiteXModule):
                 (self.burst_count.storage >= 1) & (self.burst_count.storage <= 0x80000) &
                 (end_unit <= 0x80000)),
             self.accepted_start.eq(request & available & self.config_valid),
+            self.release_owner.eq(self.owner & ~self.dispatch_pending &
+                (self.busy_mask == 0) & all_drained & host_idle),
             self.start_rejected.eq(request & ~self.accepted_start),
             self._busy_csr.status.eq(self.busy_mask),
             self._done_csr.status.eq(self.done_mask),
@@ -113,7 +118,7 @@ class HBMBurstBIST(LiteXModule):
                 If(self.owner, self._elapsed.eq(self._elapsed + 1)),
                 If((self._transfer_r & (self._transfer_r - 1)) != 0,
                     self._overlap.eq(self._overlap + 1)),
-                If(self.owner & ~self.dispatch_pending & (self.busy_mask == 0) & all_drained & host_idle,
+                If(self.release_owner,
                     self.owner.eq(0)),
                 If((self.stop.re & self.stop.storage) | quiesce_request,
                     self._stop_pending.eq(1)),
@@ -132,6 +137,13 @@ class HBMBurstBIST(LiteXModule):
                 raise ValueError("BIST ownership requires AXI256/address33/ID6")
             if interface.version != "axi4":
                 raise ValueError("BIST uses the ordered-write AXI4 shape of the HBM AXI3 subset")
+        # Same-edge copies of global ownership, protected from equivalence
+        # merging so each native mux has a local select driver.
+        local_owner = Signal(name=f"hbm_bist_pc{channel:02d}_owner",
+            attr={("DONT_TOUCH", "TRUE")})
+        self.local_owners[channel] = local_owner
+        self.sync += If(self.accepted_start, local_owner.eq(1)).Elif(
+            self.release_owner, local_owner.eq(0))
         engine = axi.AXIInterface(data_width=256, address_width=33, id_width=6)
         self.engines[channel] = engine
         mux_engine = axi.AXIInterface(data_width=256, address_width=33, id_width=6)
@@ -171,7 +183,7 @@ class HBMBurstBIST(LiteXModule):
             self.error_mask[channel].eq(faulted),
             # Count concurrent native-side acceptance, before BIST response
             # buffers; engine read consumption can occur a later cycle.
-            self._transfer[channel].eq(self.owner &
+            self._transfer[channel].eq(local_owner &
                 ((mux_axi.w.valid & mux_axi.w.ready) |
                  (mux_axi.r.valid & mux_axi.r.ready))),
         ]
@@ -207,9 +219,9 @@ class HBMBurstBIST(LiteXModule):
             cpu = getattr(getattr(cpu_axi, group), name)
             bist = getattr(getattr(mux_engine, group), name)
             if direction == DIR_M_TO_S:
-                self.comb += target.eq(Mux(self.owner, bist, cpu))
+                self.comb += target.eq(Mux(local_owner, bist, cpu))
             elif name in ("valid", "ready"):
-                self.comb += [cpu.eq(target & ~self.owner), bist.eq(target & self.owner)]
+                self.comb += [cpu.eq(target & ~local_owner), bist.eq(target & local_owner)]
             else:
                 self.comb += [cpu.eq(target), bist.eq(target)]
         # Native control fields not exercised by this AXI3 subset.
