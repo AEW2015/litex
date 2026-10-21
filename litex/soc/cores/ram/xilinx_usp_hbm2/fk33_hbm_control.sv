@@ -43,18 +43,43 @@ module fk33_hbm_control #(
     reg mailbox_fault;
     wire reset_all = sys_rst | apb_rst;
     wire apb_abort_reset = reset_all | mailbox_fault;
-    (* ASYNC_REG="TRUE" *) reg [1:0] sys_reset_sync, apb_reset_sync;
+    // Match Migen's existing asynchronous-reset synchronizer constraints:
+    // cut only these six entry PRE pins and bound each stage0-to-stage1 path.
+    // Functional reset destinations remain subject to recovery/removal timing.
+    (* ASYNC_REG="TRUE", ars_ff1="TRUE" *) reg sys_reset_sync_stage0;
+    (* ASYNC_REG="TRUE", ars_ff2="TRUE" *) reg sys_reset_sync_stage1;
+    (* ASYNC_REG="TRUE", ars_ff1="TRUE" *) reg apb_reset_sync_stage0;
+    (* ASYNC_REG="TRUE", ars_ff2="TRUE" *) reg apb_reset_sync_stage1;
     // Diagnostic sampling is reset by either domain reset, never mailbox_fault.
-    (* ASYNC_REG="TRUE" *) reg [1:0] apb_monitor_reset_sync;
+    (* ASYNC_REG="TRUE", ars_ff1="TRUE" *) reg apb_monitor_reset_sync_stage0;
+    (* ASYNC_REG="TRUE", ars_ff2="TRUE" *) reg apb_monitor_reset_sync_stage1;
+    wire [1:0] sys_reset_sync = {sys_reset_sync_stage1,sys_reset_sync_stage0};
+    wire [1:0] apb_reset_sync = {apb_reset_sync_stage1,apb_reset_sync_stage0};
+    wire [1:0] apb_monitor_reset_sync = {apb_monitor_reset_sync_stage1,apb_monitor_reset_sync_stage0};
     always @(posedge sys_clk or posedge reset_all)
-        if (reset_all) sys_reset_sync <= 2'b11;
-        else sys_reset_sync <= {sys_reset_sync[0],1'b0};
+        if (reset_all) begin
+            sys_reset_sync_stage0 <= 1'b1;
+            sys_reset_sync_stage1 <= 1'b1;
+        end else begin
+            sys_reset_sync_stage0 <= 1'b0;
+            sys_reset_sync_stage1 <= sys_reset_sync_stage0;
+        end
     always @(posedge apb_clk or posedge apb_abort_reset)
-        if (apb_abort_reset) apb_reset_sync <= 2'b11;
-        else apb_reset_sync <= {apb_reset_sync[0],1'b0};
+        if (apb_abort_reset) begin
+            apb_reset_sync_stage0 <= 1'b1;
+            apb_reset_sync_stage1 <= 1'b1;
+        end else begin
+            apb_reset_sync_stage0 <= 1'b0;
+            apb_reset_sync_stage1 <= apb_reset_sync_stage0;
+        end
     always @(posedge apb_clk or posedge reset_all)
-        if (reset_all) apb_monitor_reset_sync <= 2'b11;
-        else apb_monitor_reset_sync <= {apb_monitor_reset_sync[0],1'b0};
+        if (reset_all) begin
+            apb_monitor_reset_sync_stage0 <= 1'b1;
+            apb_monitor_reset_sync_stage1 <= 1'b1;
+        end else begin
+            apb_monitor_reset_sync_stage0 <= 1'b0;
+            apb_monitor_reset_sync_stage1 <= apb_monitor_reset_sync_stage0;
+        end
     reg request_toggle, busy, done, error_flag, timeout_flag;
     reg inject_armed, request_inject, transfer_inject;
     reg [31:0] sys_timeout_count;
