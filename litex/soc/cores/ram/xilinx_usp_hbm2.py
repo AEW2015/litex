@@ -321,7 +321,8 @@ MANAGEMENT_REGISTERS = (
 class PrimitiveHBM2(USPHBM2):
     """Bind the maintained primitive/control RTL to LiteX interfaces.
 
-    The target can map ``axi`` to SYS or provide a separate 250 MHz domain.
+    The target can map ``axi`` to SYS250 or provide AXI400 with SYS200.
+    Clock selection still requires fresh implementation and hardware checks.
     ``memory_ready`` is SYS-facing; ``memory_ready_axi`` is synchronized for
     native admission and does not reset the AXI-domain control state.
     ``control_bus`` is a raw 32-bit, 14-bit word-addressed CSR interface. It
@@ -337,18 +338,20 @@ class PrimitiveHBM2(USPHBM2):
     """
 
     def __init__(self, platform, hbm_ip_name="hbm_0", *, rtl_dir=None,
-                 stacks=2, hbm_clk_freq=900e6, axi_clk_freq=250e6,
+                 stacks=2, hbm_clk_freq=900e6, axi_clk_freq=250e6, sys_clk_freq=250e6,
                  ref_clk_freq=200e6, apb_clk_freq=100e6):
         expected = {
             "stacks": (stacks, 2),
             "hbm_clk_freq": (hbm_clk_freq, 900e6),
-            "axi_clk_freq": (axi_clk_freq, 250e6),
             "ref_clk_freq": (ref_clk_freq, 200e6),
             "apb_clk_freq": (apb_clk_freq, 100e6),
         }
         for name, (actual, required) in expected.items():
             if actual != required:
                 raise ValueError(f"FK33 primitive profile requires {name}={required!r}")
+        if (sys_clk_freq, axi_clk_freq) not in ((250e6, 250e6), (200e6, 400e6)):
+            raise ValueError("FK33 primitive clocks require SYS250/AXI250 or SYS200/AXI400")
+        self.sys_clk_freq = sys_clk_freq
         if hbm_ip_name != "hbm_0":
             raise ValueError("The tested primitive RTL module is named hbm_0")
         self.rtl_dir = (Path(rtl_dir).resolve() if rtl_dir is not None
@@ -432,6 +435,10 @@ class PrimitiveHBM2(USPHBM2):
         self.hbm_params["i_sw_ready"] = self.sw_ready
         self.hbm_params["i_sw_temperature_valid"] = self.sw_temperature_valid
         self.specials += Instance("fk33_hbm_control",
+            # Preserve the default watchdog duration and 15-second thermal age
+            # when changing SYS; APB remains at 100 MHz with its own timeout.
+            p_SYS_TIMEOUT=(800064 * int(sys_clk_freq) + 250000000 - 1) // 250000000,
+            p_TEMPERATURE_MAX_AGE=15 * int(sys_clk_freq),
             i_sys_clk=ClockSignal("sys"), i_sys_rst=ResetSignal("sys"),
             i_apb_clk=ClockSignal("apb"), i_apb_rst=ResetSignal("apb"),
             i_csr_adr=self.control_bus.adr, i_csr_dat_w=self.control_bus.dat_w,
