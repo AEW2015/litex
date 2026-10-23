@@ -321,7 +321,8 @@ MANAGEMENT_REGISTERS = (
 class PrimitiveHBM2(USPHBM2):
     """Bind the maintained primitive/control RTL to LiteX interfaces.
 
-    The target can map ``axi`` to SYS or provide a separate 250 MHz domain.
+    The target can map ``axi`` to SYS or provide a separate 250/500 MHz domain.
+    Selecting a rate does not establish implementation or hardware qualification.
     ``memory_ready`` is SYS-facing; ``memory_ready_axi`` is synchronized for
     native admission and does not reset the AXI-domain control state.
     ``control_bus`` is a raw 32-bit, 14-bit word-addressed CSR interface. It
@@ -342,13 +343,14 @@ class PrimitiveHBM2(USPHBM2):
         expected = {
             "stacks": (stacks, 2),
             "hbm_clk_freq": (hbm_clk_freq, 900e6),
-            "axi_clk_freq": (axi_clk_freq, 250e6),
             "ref_clk_freq": (ref_clk_freq, 200e6),
             "apb_clk_freq": (apb_clk_freq, 100e6),
         }
         for name, (actual, required) in expected.items():
             if actual != required:
                 raise ValueError(f"FK33 primitive profile requires {name}={required!r}")
+        if axi_clk_freq not in (250e6, 500e6):
+            raise ValueError("FK33 primitive AXI clock must be 250e6 or 500e6")
         if hbm_ip_name != "hbm_0":
             raise ValueError("The tested primitive RTL module is named hbm_0")
         self.rtl_dir = (Path(rtl_dir).resolve() if rtl_dir is not None
