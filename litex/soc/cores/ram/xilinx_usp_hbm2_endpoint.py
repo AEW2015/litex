@@ -23,11 +23,75 @@ Detected ID/LAST mismatches raise sticky protocol_error and quiesced fails shut.
 The peer must obey AXI response ordering/causality and emit no extra responses;
 this is not an arbitrary malformed-peer protocol checker.
 """
-from migen import Cat, ClockDomainsRenamer, If, Mux, Signal
-from migen.genlib.cdc import MultiReg
+from migen import Cat, ClockDomainsRenamer, If, Memory, Mux, Signal
+from migen.genlib.cdc import GrayCounter, MultiReg
 from litex.gen import LiteXModule
 from litex.soc.interconnect import axi, stream
 from litex.soc.cores.ram.xilinx_usp_hbm2_runtime import HBMClockMailbox
+
+
+class HBMRegisteredReadCDC(LiteXModule):
+    """Four-slot ownership FIFO with current-address asynchronous RAM read.
+
+    Ownership/full/empty equations are adapted from Migen genlib.fifo.AsyncFIFO
+    (Migen contributors, BSD-2-Clause). GrayCounter, MultiReg, Memory and Buffer
+    are public library primitives; no Migen or stream internals are patched.
+    A slot is released only when its payload enters the destination Buffer.
+    Producer synchronization affects valid/consume enable, never RAM address.
+    Both domains must assert reset together; independent live reset is unsafe.
+    """
+    def __init__(self, layout, *, cd_from, cd_to, gray_bus_prefix=None):
+        if cd_from == cd_to:
+            raise ValueError("The ownership FIFO requires distinct clock domains")
+        if gray_bus_prefix is not None and (not isinstance(gray_bus_prefix, str) or not gray_bus_prefix):
+            raise ValueError("Gray prefix must be a nonempty string")
+        self.sink = sink = stream.Endpoint(layout)
+        self.source = source = stream.Endpoint(layout)
+        description = sink.description
+        self.submodules.produce = produce = ClockDomainsRenamer(cd_from)(GrayCounter(3))
+        self.submodules.consume = consume = ClockDomainsRenamer(cd_to)(GrayCounter(3))
+        self.produce_seen = produce_seen = Signal(3)
+        self.consume_seen = consume_seen = Signal(3)
+        produce.q.attr.add("no_retiming")
+        consume.q.attr.add("no_retiming")
+        if gray_bus_prefix is not None:
+            produce.q.attr.add(("hbm_gray_bus", gray_bus_prefix + "_produce"))
+            consume.q.attr.add(("hbm_gray_bus", gray_bus_prefix + "_consume"))
+        self.specials += [MultiReg(produce.q, produce_seen, cd_to),
+                          MultiReg(consume.q, consume_seen, cd_from)]
+        self.writable = writable = Signal()
+        self.readable = readable = Signal()
+        self.comb += [
+            writable.eq((produce.q[2] == consume_seen[2]) |
+                        (produce.q[1] == consume_seen[1]) |
+                        (produce.q[0] != consume_seen[0])),
+            readable.eq(consume.q != produce_seen), sink.ready.eq(writable),
+            produce.ce.eq(sink.valid & writable),
+        ]
+        payload_width = len(sink.payload.raw_bits())
+        param_width = len(sink.param.raw_bits())
+        packed = Cat(sink.payload.raw_bits(), sink.param.raw_bits(), sink.first, sink.last)
+        self.storage = storage = Memory(len(packed), 4)
+        self.specials += storage
+        self.write_port = write_port = storage.get_port(write_capable=True, clock_domain=cd_from)
+        self.read_port = read_port = storage.get_port(async_read=True, clock_domain=cd_to)
+        self.specials += [write_port, read_port]
+        self.submodules.output_buffer = output_buffer = ClockDomainsRenamer(cd_to)(stream.Buffer(description))
+        self.comb += [
+            write_port.adr.eq(produce.q_binary[:2]), write_port.dat_w.eq(packed),
+            write_port.we.eq(produce.ce),
+            # CURRENT registered pointer: no readable/re/Gray lookahead here.
+            read_port.adr.eq(consume.q_binary[:2]),
+            output_buffer.sink.valid.eq(readable),
+            output_buffer.sink.payload.raw_bits().eq(read_port.dat_r[:payload_width]),
+            output_buffer.sink.first.eq(read_port.dat_r[payload_width + param_width]),
+            output_buffer.sink.last.eq(read_port.dat_r[payload_width + param_width + 1]),
+            consume.ce.eq(readable & output_buffer.sink.ready),
+            output_buffer.source.connect(source),
+        ]
+        if param_width:
+            self.comb += output_buffer.sink.param.raw_bits().eq(
+                read_port.dat_r[payload_width:payload_width + param_width])
 
 
 class HBMWideEndpoint(LiteXModule):
@@ -64,8 +128,8 @@ class HBMWideEndpoint(LiteXModule):
 
         def crossing(name, layout, source, destination):
             prefix = None if gray_bus_prefix is None else gray_bus_prefix + "_" + name
-            c = stream.ClockDomainCrossing(layout, cd_from=source, cd_to=destination,
-                depth=4, buffered=True, with_common_rst=False, gray_bus_prefix=prefix)
+            c = HBMRegisteredReadCDC(layout, cd_from=source, cd_to=destination,
+                gray_bus_prefix=prefix)
             setattr(self.submodules, name + "_cdc", c)
             return c
         aw = crossing("aw", desc, app_domain, native_domain)
