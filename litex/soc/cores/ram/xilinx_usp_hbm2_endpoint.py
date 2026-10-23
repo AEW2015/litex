@@ -61,16 +61,22 @@ class HBMRegisteredReadCDC(LiteXModule):
     Producer synchronization affects valid/consume enable, never RAM address.
     Both domains must assert reset together; independent live reset is unsafe.
     """
-    def __init__(self, layout, *, cd_from, cd_to, gray_bus_prefix=None):
+    def __init__(self, layout, *, cd_from, cd_to, gray_bus_prefix=None,
+                 read_address_max_fanout=None):
         if cd_from == cd_to:
             raise ValueError("The ownership FIFO requires distinct clock domains")
         if gray_bus_prefix is not None and (not isinstance(gray_bus_prefix, str) or not gray_bus_prefix):
             raise ValueError("Gray prefix must be a nonempty string")
+        if read_address_max_fanout is not None and (
+                type(read_address_max_fanout) is not int or read_address_max_fanout < 1):
+            raise ValueError("Read address fanout hint must be a positive integer")
         self.sink = sink = stream.Endpoint(layout)
         self.source = source = stream.Endpoint(layout)
         description = sink.description
         self.submodules.produce = produce = ClockDomainsRenamer(cd_from)(GrayCounter(3))
         self.submodules.consume = consume = ClockDomainsRenamer(cd_to)(GrayCounter(3))
+        if read_address_max_fanout is not None:
+            consume.q_binary.attr.add(("max_fanout", read_address_max_fanout))
         self.produce_seen = produce_seen = Signal(3)
         self.consume_seen = consume_seen = Signal(3)
         produce.q.attr.add("no_retiming")
@@ -368,7 +374,11 @@ class _HBMWindowFourEndpoint(LiteXModule):
         self.comb += self.protocol_error.eq(app_error | native_error_app)
         def crossing(name, layout, source, destination):
             prefix = None if gray_bus_prefix is None else gray_bus_prefix + "_" + name
-            c = HBMRegisteredReadCDC(layout, cd_from=source, cd_to=destination, gray_bus_prefix=prefix)
+            # Physical replication hint only; Gray publication/ownership and
+            # current registered read address remain functionally unchanged.
+            fanout = {"aw": 8, "ar": 8, "w": 32}.get(name) if destination == native_domain else None
+            c = HBMRegisteredReadCDC(layout, cd_from=source, cd_to=destination,
+                gray_bus_prefix=prefix, read_address_max_fanout=fanout)
             setattr(self.submodules, name + "_cdc", c)
             return c
         def queue(name, layout, domain):
