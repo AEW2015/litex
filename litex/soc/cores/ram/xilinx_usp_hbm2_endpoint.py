@@ -70,7 +70,10 @@ class HBMRegisteredReadCDC(LiteXModule):
         ]
         payload_width = len(sink.payload.raw_bits())
         param_width = len(sink.param.raw_bits())
-        packed = Cat(sink.payload.raw_bits(), sink.param.raw_bits(), sink.first, sink.last)
+        packed_fields = [sink.payload.raw_bits()]
+        if param_width:
+            packed_fields.append(sink.param.raw_bits())
+        packed = Cat(*packed_fields, sink.first, sink.last)
         self.storage = storage = Memory(len(packed), 4)
         self.specials += storage
         self.write_port = write_port = storage.get_port(write_capable=True, clock_domain=cd_from)
