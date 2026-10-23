@@ -1,7 +1,8 @@
 """Single ordered 512-bit application / 256-bit native AXI3 transport prototype.
 
 This is fabric transport, not an HBM controller or full-bandwidth scheduler.
-Exactly one write and one read may be outstanding independently; credits retire
+The default allows one write and one read independently; the opt-in four-command
+window preserves order with one ID lock per direction. Credits retire
 only when the application consumes B or the final packed R word. Descriptor LEN
 counts 256-bit native beats minus one (1..16), not 512-bit words. Addresses must
 be 32-byte aligned and bursts must not cross 4KiB. No WID/RID interleaving or
@@ -119,7 +120,20 @@ class HBMRegisteredReadCDC(LiteXModule):
 
 class HBMWideEndpoint(LiteXModule):
     def __init__(self, *, app_domain="sys", native_domain="axi", address_width=33,
-                 id_width=6, fifo_depth=4, gray_bus_prefix=None):
+                 id_width=6, fifo_depth=4, gray_bus_prefix=None, max_outstanding=1):
+        self.max_outstanding = max_outstanding
+        if max_outstanding not in (1, 4):
+            raise ValueError("The endpoint supports one or four outstanding descriptors")
+        if max_outstanding == 4:
+            self.submodules.window = window = _HBMWindowFourEndpoint(
+                app_domain=app_domain, native_domain=native_domain,
+                address_width=address_width, id_width=id_width,
+                fifo_depth=fifo_depth, gray_bus_prefix=gray_bus_prefix)
+            for name in ("aw", "ar", "w", "b", "r", "native", "quiesce", "drained",
+                         "quiesced", "protocol_error", "write_pending", "read_pending",
+                         "link_ready", "write_credits", "read_credits"):
+                setattr(self, name, getattr(window, name))
+            return
         if app_domain == native_domain or address_width < 12 or id_width < 1:
             raise ValueError("Endpoint requires distinct domains, address>=12 and ID>=1")
         if fifo_depth != 4:
@@ -319,4 +333,190 @@ class HBMWideEndpoint(LiteXModule):
             ack.send.eq(idle_native & ~ack.busy & (~ack_valid | (ack_sent != request.output))),
             self.quiesced.eq(self.link_ready & self.quiesce & (previous_q == self.quiesce) &
                 self.drained & (ack.output == payload) & ~self.protocol_error)]
+        native += If(ack.send & ~ack.busy, ack_sent.eq(request.output), ack_valid.eq(1))
+
+
+class _HBMWindowFourEndpoint(LiteXModule):
+    """Four ordered commands per direction; one ID lock per application window.
+
+    Native issue and acceptance have separate ownership queues. Credits retire
+    only at application consumption. This is not an AXI reordering engine.
+    """
+    def __init__(self, *, app_domain, native_domain, address_width, id_width,
+                 fifo_depth, gray_bus_prefix):
+        if app_domain == native_domain or address_width < 12 or id_width < 1 or fifo_depth != 4:
+            raise ValueError("Window four requires distinct domains, address>=12, ID>=1 and depth four")
+        desc = [("addr", address_width), ("len", 4), ("id", id_width)]
+        wide_w = [("data", 512), ("strb", 64), ("keep", 64)]
+        small_w = [("data", 256), ("strb", 32), ("keep", 32)]
+        small_r = [("data", 256), ("keep", 32), ("id", id_width), ("resp", 2)]
+        wide_r = [("data", 512), ("keep", 64), ("id", 2*id_width), ("resp", 4)]
+        self.aw, self.ar = stream.Endpoint(desc), stream.Endpoint(desc)
+        self.w = stream.Endpoint([("data", 512), ("strb", 64)])
+        self.b, self.r = stream.Endpoint([("id", id_width), ("resp", 2)]), stream.Endpoint(wide_r)
+        self.native = n = axi.AXIInterface(data_width=256, address_width=address_width,
+            id_width=id_width, version="axi3", clock_domain=native_domain)
+        for name in ("quiesce", "drained", "quiesced", "protocol_error", "write_pending", "read_pending", "link_ready"):
+            setattr(self, name, Signal())
+        self.write_credits, self.read_credits = Signal(3), Signal(3)
+        app, native = getattr(self.sync, app_domain), getattr(self.sync, native_domain)
+        startup = Signal(2)
+        app += If(startup != 3, startup.eq(startup + 1))
+        self.comb += self.link_ready.eq(startup == 3)
+        app_error, native_error, native_error_app = Signal(), Signal(), Signal()
+        self.specials += MultiReg(native_error, native_error_app, app_domain)
+        self.comb += self.protocol_error.eq(app_error | native_error_app)
+        def crossing(name, layout, source, destination):
+            prefix = None if gray_bus_prefix is None else gray_bus_prefix + "_" + name
+            c = HBMRegisteredReadCDC(layout, cd_from=source, cd_to=destination, gray_bus_prefix=prefix)
+            setattr(self.submodules, name + "_cdc", c)
+            return c
+        def queue(name, layout, domain):
+            q = ClockDomainsRenamer(domain)(stream.SyncFIFO(layout, 4, buffered=True))
+            setattr(self.submodules, name, q)
+            return q
+        aw, ar = crossing("aw", desc, app_domain, native_domain), crossing("ar", desc, app_domain, native_domain)
+        w = crossing("w", wide_w, app_domain, native_domain)
+        b, r = crossing("b", self.b.description, native_domain, app_domain), crossing("r", wide_r, native_domain, app_domain)
+        lengths = queue("application_write_lengths", [("len", 4)], app_domain)
+        write_dispatch = queue("application_write_dispatch", desc, app_domain)
+        # A registered dispatch head retains descriptor ownership until each
+        # branch has acknowledged it; neither branch can duplicate a command.
+        locks = [Signal(id_width), Signal(id_width)]
+        fires = []
+        for ep, c, count, lock in [(self.aw, aw, self.write_credits, locks[0]), (self.ar, ar, self.read_credits, locks[1])]:
+            legal, admission = Signal(), Signal()
+            retire = (self.b.valid & self.b.ready) if ep is self.aw else (self.r.valid & self.r.ready & self.r.last)
+            self.comb += [legal.eq((ep.addr[:5] == 0) & ((ep.addr[:12] + ((ep.len + 1) << 5)) <= 4096)),
+                admission.eq(legal & ((count < 4) | retire) & ((count == 0) | (ep.id == lock)) &
+                    ~self.quiesce & self.link_ready & ~self.protocol_error),
+                ep.connect(write_dispatch.sink if ep is self.aw else c.sink, omit={"valid", "ready"})]
+            sink = write_dispatch.sink if ep is self.aw else c.sink
+            self.comb += [sink.valid.eq(ep.valid & admission), ep.ready.eq(sink.ready & admission)]
+            fire = ep.valid & ep.ready
+            fires.append(fire)
+            app += [If(fire & (count == 0), lock.eq(ep.id)),
+                If(ep.valid & ~legal & self.link_ready & ~self.quiesce, app_error.eq(1))]
+        sent_aw, sent_length = Signal(), Signal()
+        dispatch = write_dispatch.source
+        dispatch_done = dispatch.valid & (sent_aw | aw.sink.ready) & (sent_length | lengths.sink.ready)
+        self.comb += [dispatch.connect(aw.sink, omit={"valid", "ready"}),
+            aw.sink.valid.eq(dispatch.valid & ~sent_aw), lengths.sink.valid.eq(dispatch.valid & ~sent_length),
+            lengths.sink.len.eq(dispatch.len), dispatch.ready.eq((sent_aw | aw.sink.ready) & (sent_length | lengths.sink.ready))]
+        app += [If(aw.sink.valid & aw.sink.ready, sent_aw.eq(1)),
+            If(lengths.sink.valid & lengths.sink.ready, sent_length.eq(1)),
+            If(dispatch_done, sent_aw.eq(0), sent_length.eq(0))]
+        aw_fire, ar_fire = fires
+        self.comb += [b.source.connect(self.b), r.source.connect(self.r),
+            self.write_pending.eq(self.write_credits != 0), self.read_pending.eq(self.read_credits != 0)]
+        for count, take, retire in [(self.write_credits, aw_fire, self.b.valid & self.b.ready),
+                                  (self.read_credits, ar_fire, self.r.valid & self.r.ready & self.r.last)]:
+            app += [If(take & ~retire, count.eq(count + 1)).Elif(retire & ~take, count.eq(count - 1)),
+                If(retire & (count == 0), app_error.eq(1))]
+        app_w_active, app_left, app_first = Signal(), Signal(5), Signal()
+        app_w_fire = self.w.valid & self.w.ready
+        app_terminal = app_w_fire & (app_left <= 2)
+        load_length = lengths.source.valid & lengths.source.ready
+        self.comb += [lengths.source.ready.eq(~app_w_active | app_terminal),
+            w.sink.valid.eq(self.w.valid & app_w_active), self.w.ready.eq(w.sink.ready & app_w_active),
+            w.sink.data.eq(self.w.data), w.sink.strb.eq(self.w.strb),
+            w.sink.keep.eq(Mux(app_left == 1, (1 << 32)-1, (1 << 64)-1)),
+            w.sink.first.eq(app_first), w.sink.last.eq(app_left <= 2)]
+        app += [If(app_w_fire, app_first.eq(0), app_left.eq(app_left - 2),
+                    If(self.w.last != (app_left <= 2), app_error.eq(1))),
+                If(app_terminal, app_w_active.eq(0), app_left.eq(0)),
+                If(load_length, app_w_active.eq(1), app_left.eq(lengths.source.len + 1), app_first.eq(1))]
+        self.submodules.unpack = unpack = ClockDomainsRenamer(native_domain)(stream.StrideConverter(wide_w, small_w))
+        self.submodules.pack = pack = ClockDomainsRenamer(native_domain)(stream.StrideConverter(small_r, wide_r))
+        self.submodules.write_elastic = elastic = ClockDomainsRenamer(native_domain)(stream.Buffer(wide_w, pipe_valid=False, pipe_ready=True))
+        self.comb += [w.source.connect(elastic.sink), elastic.source.connect(unpack.sink), pack.source.connect(r.sink)]
+        aw_issue, w_issue, b_expect = [queue(name, desc, native_domain) for name in ("aw_issue", "w_issue", "b_expect")]
+        ar_issue, r_expect = [queue(name, desc, native_domain) for name in ("ar_issue", "r_expect")]
+        dispatch_states = []
+        for role, src, destinations in [("write_dispatch", aw.source, [aw_issue.sink, w_issue.sink, b_expect.sink]),
+                                        ("read_dispatch", ar.source, [ar_issue.sink, r_expect.sink])]:
+            accepted = Signal(len(destinations))
+            dispatch_states.append(accepted)
+            done = src.valid
+            updates = []
+            for bit, dst in enumerate(destinations):
+                done = done & (accepted[bit] | dst.ready)
+                self.comb += [src.connect(dst, omit={"valid", "ready"}), dst.valid.eq(src.valid & ~accepted[bit])]
+                updates.append(accepted[bit] | (dst.valid & dst.ready))
+            self.comb += src.ready.eq(done)
+            setattr(self.submodules, role + "_control", HBMSynchronousControlRegister(
+                accepted, Mux(done, 0, Cat(*updates)), 1, domain=native_domain, name="window_" + role))
+        tokens = {name:queue(name + "_accepted", [("token", 1)], native_domain) for name in ("aw", "w", "ar")}
+        buffers = {}
+        for name in ("aw", "w", "ar", "b", "r"):
+            buffers[name] = ClockDomainsRenamer(native_domain)(stream.Buffer(getattr(n, name).description))
+            setattr(self.submodules, name + "_buffer", buffers[name])
+        for name, commands in [("aw", aw_issue), ("ar", ar_issue)]:
+            buf, port, token = buffers[name], getattr(n, name), tokens[name]
+            self.comb += [buf.sink.valid.eq(commands.source.valid), commands.source.ready.eq(buf.sink.ready),
+                buf.sink.addr.eq(commands.source.addr), buf.sink.len.eq(commands.source.len), buf.sink.id.eq(commands.source.id),
+                buf.sink.size.eq(5), buf.sink.burst.eq(1),
+                buf.source.connect(port, omit={"valid", "ready"}),
+                port.valid.eq(buf.source.valid & token.sink.ready), buf.source.ready.eq(port.ready & token.sink.ready),
+                token.sink.valid.eq(port.valid & port.ready), token.sink.token.eq(1)]
+            for field in ("lock", "cache", "prot", "qos", "region"): self.comb += getattr(buf.sink, field).eq(0)
+        wa, wl, wid = Signal(), Signal(5), Signal(id_width)
+        wb, rb, bb = buffers["w"], buffers["r"], buffers["b"]
+        w_issue_fire = wb.sink.valid & wb.sink.ready
+        w_terminal = w_issue_fire & (wl == 1)
+        w_load = w_issue.source.valid & w_issue.source.ready
+        self.comb += [w_issue.source.ready.eq(~wa | w_terminal),
+            wb.sink.valid.eq(unpack.source.valid & wa), unpack.source.ready.eq(wb.sink.ready & wa),
+            wb.sink.data.eq(unpack.source.data), wb.sink.strb.eq(unpack.source.strb), wb.sink.id.eq(wid), wb.sink.last.eq(wl == 1),
+            wb.source.connect(n.w, omit={"valid", "ready"}),
+            n.w.valid.eq(wb.source.valid & (~wb.source.last | tokens["w"].sink.ready)),
+            wb.source.ready.eq(n.w.ready & (~wb.source.last | tokens["w"].sink.ready)),
+            tokens["w"].sink.valid.eq(n.w.valid & n.w.ready & n.w.last), tokens["w"].sink.token.eq(1)]
+        def control(q, d, ce, name):
+            setattr(self.submodules, name + "_control", HBMSynchronousControlRegister(q, d, ce, domain=native_domain, name="window_" + name))
+        control(wa, Mux(w_load, 1, 0), w_load | w_terminal, "write_active")
+        control(wl, Mux(w_load, w_issue.source.len + 1, wl - 1), w_load | w_issue_fire, "write_left")
+        control(wid, w_issue.source.id, w_load, "write_id")
+        native += If(w_issue_fire & (unpack.source.last != (wl == 1)), native_error.eq(1))
+        complete = b_expect.source.valid & tokens["aw"].source.valid & tokens["w"].source.valid
+        b_fire = n.b.valid & n.b.ready
+        self.comb += [n.b.ready.eq(bb.sink.ready & complete), bb.sink.valid.eq(n.b.valid & complete),
+            bb.sink.id.eq(n.b.id), bb.sink.resp.eq(n.b.resp),
+            b_expect.source.ready.eq(b_fire), tokens["aw"].source.ready.eq(b_fire), tokens["w"].source.ready.eq(b_fire),
+            b.sink.valid.eq(bb.source.valid), bb.source.ready.eq(b.sink.ready), b.sink.id.eq(bb.source.id), b.sink.resp.eq(bb.source.resp)]
+        native += If(b_fire & (n.b.id != b_expect.source.id), native_error.eq(1))
+        ra, rl, rbeats, rid = Signal(), Signal(5), Signal(5), Signal(id_width)
+        read_fire = n.r.valid & n.r.ready
+        r_terminal = read_fire & (rl == 1)
+        r_load = r_expect.source.valid & r_expect.source.ready
+        self.comb += [r_expect.source.ready.eq((~ra | r_terminal) & tokens["ar"].source.valid),
+            tokens["ar"].source.ready.eq(r_load),
+            n.r.ready.eq(rb.sink.ready & ra), rb.sink.valid.eq(n.r.valid & ra),
+            rb.sink.data.eq(n.r.data), rb.sink.id.eq(n.r.id), rb.sink.resp.eq(n.r.resp),
+            rb.sink.first.eq(rl == rbeats), rb.sink.last.eq(rl == 1),
+            pack.sink.valid.eq(rb.source.valid), rb.source.ready.eq(pack.sink.ready),
+            pack.sink.data.eq(rb.source.data), pack.sink.id.eq(rb.source.id), pack.sink.resp.eq(rb.source.resp),
+            pack.sink.keep.eq((1 << 32)-1), pack.sink.first.eq(rb.source.first), pack.sink.last.eq(rb.source.last)]
+        control(ra, Mux(r_load, 1, 0), r_load | r_terminal, "read_active")
+        control(rl, Mux(r_load, r_expect.source.len + 1, rl - 1), r_load | read_fire, "read_left")
+        control(rbeats, r_expect.source.len + 1, r_load, "read_beats")
+        control(rid, r_expect.source.id, r_load, "read_id")
+        native += If(read_fire & ((n.r.id != rid) | (n.r.last != (rl == 1))), native_error.eq(1))
+        self.comb += self.drained.eq((self.write_credits == 0) & (self.read_credits == 0) & ~app_w_active &
+            (lengths.level == 0) & ~lengths.source.valid & (write_dispatch.level == 0) & ~write_dispatch.source.valid &
+            ~sent_aw & ~sent_length & ~aw_fire & ~ar_fire)
+        self.submodules.quiesce_request = request = HBMClockMailbox(33, app_domain, native_domain)
+        self.submodules.quiesce_ack = ack = HBMClockMailbox(33, native_domain, app_domain)
+        generation, previous = Signal(32), Signal()
+        request_sent, ack_sent, request_valid, ack_valid = Signal(33), Signal(33), Signal(), Signal()
+        payload = Cat(self.quiesce, generation)
+        app += [previous.eq(self.quiesce), If(previous != self.quiesce, generation.eq(generation + 1)),
+            If(request.send & ~request.busy, request_sent.eq(payload), request_valid.eq(1))]
+        idle = ~wa & ~ra & ~aw.source.valid & ~ar.source.valid & ~w.source.valid & ~elastic.source.valid & ~unpack.source.valid & ~pack.source.valid
+        for q in [aw_issue, w_issue, b_expect, ar_issue, r_expect] + list(tokens.values()): idle = idle & (q.level == 0) & ~q.source.valid
+        for buf in buffers.values(): idle = idle & ~buf.source.valid
+        for accepted in dispatch_states: idle = idle & (accepted == 0)
+        self.comb += [request.data.eq(payload), request.send.eq((previous == self.quiesce) & ~request.busy & (~request_valid | (request_sent != payload))),
+            ack.data.eq(request.output), ack.send.eq(idle & ~ack.busy & (~ack_valid | (ack_sent != request.output))),
+            self.quiesced.eq(self.link_ready & self.quiesce & (previous == self.quiesce) & self.drained & (ack.output == payload) & ~self.protocol_error)]
         native += If(ack.send & ~ack.busy, ack_sent.eq(request.output), ack_valid.eq(1))
