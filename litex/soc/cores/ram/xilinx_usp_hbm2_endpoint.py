@@ -77,7 +77,12 @@ class HBMWideEndpoint(LiteXModule):
             stream.StrideConverter(wide_w, small_w))
         self.submodules.pack = pack = ClockDomainsRenamer(native_domain)(
             stream.StrideConverter(small_r, wide_r))
-        self.comb += [w.source.connect(unpack.sink), pack.source.connect(r.sink)]
+        # The CDC already registers data. Cut the gearbox-ready to FIFO
+        # read-address loop with a standard one-word elastic skid stage.
+        self.submodules.write_elastic = write_elastic = ClockDomainsRenamer(native_domain)(
+            stream.Buffer(wide_w, pipe_valid=False, pipe_ready=True))
+        self.comb += [w.source.connect(write_elastic.sink),
+                      write_elastic.source.connect(unpack.sink), pack.source.connect(r.sink)]
         app_error, native_error, native_error_app = Signal(), Signal(), Signal()
         self.specials += MultiReg(native_error, native_error_app, app_domain)
         self.comb += self.protocol_error.eq(app_error | native_error_app)
@@ -205,7 +210,7 @@ class HBMWideEndpoint(LiteXModule):
         idle_native = Signal()
         self.comb += idle_native.eq(~write_active & ~read_active &
             ~aw.source.valid & ~ar.source.valid & ~w.source.valid &
-            ~unpack.source.valid & ~pack.source.valid &
+            ~write_elastic.source.valid & ~unpack.source.valid & ~pack.source.valid &
             ~buffers["aw"].source.valid & ~wb.source.valid &
             ~buffers["ar"].source.valid & ~bb.source.valid & ~rb.source.valid)
         self.comb += [request.data.eq(payload),
