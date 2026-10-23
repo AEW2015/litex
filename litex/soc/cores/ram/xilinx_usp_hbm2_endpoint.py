@@ -23,11 +23,31 @@ Detected ID/LAST mismatches raise sticky protocol_error and quiesced fails shut.
 The peer must obey AXI response ordering/causality and emit no extra responses;
 this is not an arbitrary malformed-peer protocol checker.
 """
-from migen import Cat, ClockDomainsRenamer, If, Memory, Mux, Signal
+from migen import Cat, ClockDomainsRenamer, ClockSignal, If, Instance, Memory, Module, Mux, ResetSignal, Signal
 from migen.genlib.cdc import GrayCounter, MultiReg
 from litex.gen import LiteXModule
 from litex.soc.interconnect import axi, stream
 from litex.soc.cores.ram.xilinx_usp_hbm2_runtime import HBMClockMailbox
+
+
+class HBMControlFF(Instance):
+    """Dedicated synchronous reset/set control FF; simulation override is external."""
+    def __init__(self, q, d, ce, *, domain, name, reset):
+        self.q, self.d, self.ce = q, d, ce
+        self.domain, self.reset_value = domain, reset
+        reset_pin = {"i_S" if reset else "i_R": ResetSignal(domain)}
+        super().__init__("FDSE" if reset else "FDRE", name=name,
+            p_INIT=reset, i_C=ClockSignal(domain), i_CE=ce, i_D=d, o_Q=q,
+            attr={("hbm_direct_reset", name)}, **reset_pin)
+
+
+class HBMSynchronousControlRegister(Module):
+    """Keep functional clears on D/CE and the domain reset on dedicated R/S."""
+    def __init__(self, q, d, ce, *, domain, name):
+        for bit in range(len(q)):
+            self.specials += HBMControlFF(q[bit], d[bit], ce, domain=domain,
+                name="hbm_control_{}_bit{}".format(name, bit),
+                reset=(q.reset.value >> bit) & 1)
 
 
 class HBMRegisteredReadCDC(LiteXModule):
@@ -202,6 +222,16 @@ class HBMWideEndpoint(LiteXModule):
         aw_queued, aw_done, ar_queued, ar_done = Signal(), Signal(), Signal(), Signal()
         write_left, write_retired, read_left = Signal(5), Signal(5), Signal(5)
         write_beats = Signal(5)
+        write_descriptor_fire = aw.source.valid & aw.source.ready
+        native_write_fire = n.w.valid & n.w.ready
+        read_descriptor_fire = ar.source.valid & ar.source.ready
+        packed_read_last_fire = pack.source.valid & pack.source.ready & pack.source.last
+        self.submodules.write_retired_control = HBMSynchronousControlRegister(
+            write_retired, Mux(native_write_fire, write_retired + 1, 0),
+            write_descriptor_fire | native_write_fire, domain=native_domain, name="endpoint_write_retired")
+        self.submodules.read_active_control = HBMSynchronousControlRegister(
+            read_active, Mux(packed_read_last_fire, 0, 1),
+            read_descriptor_fire | packed_read_last_fire, domain=native_domain, name="endpoint_read_active")
         for source, active, queued, buf in [(aw.source, write_active, aw_queued, buffers["aw"]),
                                            (ar.source, read_active, ar_queued, buffers["ar"])]:
             self.comb += [source.ready.eq(~active), buf.sink.valid.eq(active & ~queued),
@@ -239,17 +269,16 @@ class HBMWideEndpoint(LiteXModule):
             If(aw.source.valid & aw.source.ready,
                 write_active.eq(1), aw_queued.eq(0), aw_done.eq(0),
                 write_id.eq(aw.source.id), write_addr.eq(aw.source.addr), write_len.eq(aw.source.len),
-                write_beats.eq(aw.source.len + 1), write_left.eq(aw.source.len + 1), write_retired.eq(0)),
+                write_beats.eq(aw.source.len + 1), write_left.eq(aw.source.len + 1)),
             If(buffers["aw"].sink.valid & buffers["aw"].sink.ready, aw_queued.eq(1)),
             If(n.aw.valid & n.aw.ready, aw_done.eq(1)),
             If(wb.sink.valid & wb.sink.ready,
                 write_left.eq(write_left - 1),
                 If(unpack.source.last != (write_left == 1), native_error.eq(1))),
-            If(n.w.valid & n.w.ready, write_retired.eq(write_retired + 1)),
             If(bb.source.valid & bb.source.ready,
                 write_active.eq(0), If(bb.source.id != write_id, native_error.eq(1))),
             If(ar.source.valid & ar.source.ready,
-                read_active.eq(1), ar_queued.eq(0), ar_done.eq(0),
+                ar_queued.eq(0), ar_done.eq(0),
                 read_id.eq(ar.source.id), read_addr.eq(ar.source.addr), read_len.eq(ar.source.len),
                 read_left.eq(ar.source.len + 1)),
             If(buffers["ar"].sink.valid & buffers["ar"].sink.ready, ar_queued.eq(1)),
@@ -257,7 +286,6 @@ class HBMWideEndpoint(LiteXModule):
             If(n.r.valid & n.r.ready,
                 read_left.eq(read_left - 1),
                 If((n.r.last != (read_left == 1)) | (n.r.id != read_id), native_error.eq(1))),
-            If(pack.source.valid & pack.source.ready & pack.source.last, read_active.eq(0)),
         ]
 
         # App credits cover commands not yet visible natively, packing halves,
