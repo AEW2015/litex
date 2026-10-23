@@ -374,8 +374,7 @@ class PrimitiveHBM2(USPHBM2):
         self.operating_clock_mhz = CSRConstant(900, name="operating_clock_mhz")
         self.operating_data_rate_mt_s = CSRConstant(1800, name="operating_data_rate_mt_s")
         self.model_data_rate_mt_s = CSRConstant(1800, name="model_data_rate_mt_s")
-        # AXI500 exceeds the stock HBM IP AXI clock policy; HBM stays at 900.
-        self.experimental_overclock = CSRConstant(int(axi_clk_freq == 500e6), name="experimental_overclock")
+        self.experimental_overclock = CSRConstant(0, name="experimental_overclock")
 
         self.control_bus = csr_bus.Interface(data_width=32, address_width=14)
         self.sw_ready = Signal(2, name="hbm_sw_ready")
