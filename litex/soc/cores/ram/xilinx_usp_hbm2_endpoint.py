@@ -224,11 +224,15 @@ class HBMWideEndpoint(LiteXModule):
         write_beats = Signal(5)
         write_descriptor_fire = aw.source.valid & aw.source.ready
         native_write_fire = n.w.valid & n.w.ready
+        write_response_fire = buffers["b"].source.valid & buffers["b"].source.ready
         read_descriptor_fire = ar.source.valid & ar.source.ready
         packed_read_last_fire = pack.source.valid & pack.source.ready & pack.source.last
         self.submodules.write_retired_control = HBMSynchronousControlRegister(
             write_retired, Mux(native_write_fire, write_retired + 1, 0),
             write_descriptor_fire | native_write_fire, domain=native_domain, name="endpoint_write_retired")
+        self.submodules.write_active_control = HBMSynchronousControlRegister(
+            write_active, Mux(write_response_fire, 0, 1),
+            write_descriptor_fire | write_response_fire, domain=native_domain, name="endpoint_write_active")
         self.submodules.read_active_control = HBMSynchronousControlRegister(
             read_active, Mux(packed_read_last_fire, 0, 1),
             read_descriptor_fire | packed_read_last_fire, domain=native_domain, name="endpoint_read_active")
@@ -267,7 +271,7 @@ class HBMWideEndpoint(LiteXModule):
         ]
         native += [
             If(aw.source.valid & aw.source.ready,
-                write_active.eq(1), aw_queued.eq(0), aw_done.eq(0),
+                aw_queued.eq(0), aw_done.eq(0),
                 write_id.eq(aw.source.id), write_addr.eq(aw.source.addr), write_len.eq(aw.source.len),
                 write_beats.eq(aw.source.len + 1), write_left.eq(aw.source.len + 1)),
             If(buffers["aw"].sink.valid & buffers["aw"].sink.ready, aw_queued.eq(1)),
@@ -276,7 +280,7 @@ class HBMWideEndpoint(LiteXModule):
                 write_left.eq(write_left - 1),
                 If(unpack.source.last != (write_left == 1), native_error.eq(1))),
             If(bb.source.valid & bb.source.ready,
-                write_active.eq(0), If(bb.source.id != write_id, native_error.eq(1))),
+                If(bb.source.id != write_id, native_error.eq(1))),
             If(ar.source.valid & ar.source.ready,
                 ar_queued.eq(0), ar_done.eq(0),
                 read_id.eq(ar.source.id), read_addr.eq(ar.source.addr), read_len.eq(ar.source.len),
