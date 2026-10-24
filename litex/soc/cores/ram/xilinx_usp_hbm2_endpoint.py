@@ -51,6 +51,47 @@ class HBMSynchronousControlRegister(Module):
                 reset=(q.reset.value >> bit) & 1)
 
 
+class HBMWriteUnpacker(LiteXModule):
+    """Fixed 512-to-256 write stream with dedicated-reset packet controls.
+
+    The two-slice selection and empty-tail handling follow LiteX's
+    _DownConverter/StrideConverter (LiteX contributors, BSD-2-Clause). KEEP
+    describes occupied slices; a zero WSTRB still represents a real AXI beat.
+    The producer holds the wide word until its upper slice is consumed,
+    including an internally dropped upper tail after an odd final beat.
+    """
+    def __init__(self, *, clock_domain="sys"):
+        self.sink   = sink   = stream.Endpoint([("data", 512), ("strb", 64), ("keep", 64)])
+        self.source = source = stream.Endpoint([("data", 256), ("strb", 32), ("keep", 32)])
+        self.index    = index    = Signal()
+        self.drop     = drop     = Signal()
+        self.transfer = transfer = Signal()
+
+        # The generic converter's mux and packet index start at zero and
+        # advance on the same transfer. One bit preserves both state machines.
+        packet_end = Signal()
+        self.comb += [
+            packet_end.eq(sink.last & (index | (sink.keep[32:64] == 0))),
+            source.valid.eq(sink.valid & ~drop),
+            source.first.eq(sink.first & ~index & ~drop),
+            source.last.eq(packet_end),
+            sink.ready.eq(index & (source.ready | drop)),
+            transfer.eq(sink.valid & (source.ready | drop)),
+            source.data.eq(Mux(index, sink.data[256:512], sink.data[:256])),
+            source.strb.eq(Mux(index, sink.strb[32:64], sink.strb[:32])),
+            source.keep.eq(Mux(index, sink.keep[32:64], sink.keep[:32])),
+        ]
+
+        self.submodules.index_control = HBMSynchronousControlRegister(
+            index, ~index, transfer,
+            domain=clock_domain, name="window_write_unpack_index")
+        # Upper-slice completion clears drop with priority; lower-slice early
+        # termination sets it. Otherwise retain the old value, as StrideConverter.
+        self.submodules.drop_control = HBMSynchronousControlRegister(
+            drop, Mux(index, 0, Mux(packet_end, 1, drop)), transfer,
+            domain=clock_domain, name="window_write_unpack_drop")
+
+
 class HBMRegisteredReadCDC(LiteXModule):
     """Four-slot ownership FIFO with current-address asynchronous RAM read.
 
@@ -436,7 +477,7 @@ class _HBMWindowFourEndpoint(LiteXModule):
                     If(self.w.last != (app_left <= 2), app_error.eq(1))),
                 If(app_terminal, app_w_active.eq(0), app_left.eq(0)),
                 If(load_length, app_w_active.eq(1), app_left.eq(lengths.source.len + 1), app_first.eq(1))]
-        self.submodules.unpack = unpack = ClockDomainsRenamer(native_domain)(stream.StrideConverter(wide_w, small_w))
+        self.submodules.unpack = unpack = HBMWriteUnpacker(clock_domain=native_domain)
         self.submodules.pack = pack = ClockDomainsRenamer(native_domain)(stream.StrideConverter(small_r, wide_r))
         self.submodules.write_elastic = elastic = ClockDomainsRenamer(native_domain)(stream.Buffer(wide_w, pipe_valid=False, pipe_ready=True))
         self.comb += [w.source.connect(elastic.sink), elastic.source.connect(unpack.sink), pack.source.connect(r.sink)]
