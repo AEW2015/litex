@@ -325,6 +325,9 @@ class PrimitiveHBM2(USPHBM2):
     Clock selection still requires fresh implementation and hardware checks.
     ``memory_ready`` is SYS-facing; ``memory_ready_axi`` is synchronized for
     native admission and does not reset the AXI-domain control state.
+    With ``with_native_ready=False``, ``memory_ready_axi`` is constant zero
+    and its synchronizer is absent. Use this only when SYS owns admission
+    and the application transport tracks accepted work across its own CDC.
     ``control_bus`` is a raw 32-bit, 14-bit word-addressed CSR interface. It
     must be connected to the SoC's CSR interconnect without a second CSR bank
     decoder: the control RTL already selects bank 6 and registers responses.
@@ -339,7 +342,7 @@ class PrimitiveHBM2(USPHBM2):
 
     def __init__(self, platform, hbm_ip_name="hbm_0", *, rtl_dir=None,
                  stacks=2, hbm_clk_freq=900e6, axi_clk_freq=250e6, sys_clk_freq=250e6,
-                 ref_clk_freq=200e6, apb_clk_freq=100e6):
+                 ref_clk_freq=200e6, apb_clk_freq=100e6, with_native_ready=True):
         expected = {
             "stacks": (stacks, 2),
             "hbm_clk_freq": (hbm_clk_freq, 900e6),
@@ -382,7 +385,10 @@ class PrimitiveHBM2(USPHBM2):
         self.memory_ready = Signal(name="hbm_memory_ready")
         self.comb += self.memory_ready.eq(self.sw_ready == 3)
         self.memory_ready_axi = Signal(name="hbm_memory_ready_axi")
-        self.specials += MultiReg(self.memory_ready, self.memory_ready_axi, "axi")
+        if with_native_ready:
+            self.specials += MultiReg(self.memory_ready, self.memory_ready_axi, "axi")
+        else:
+            self.comb += self.memory_ready_axi.eq(0)
         self.sw_temperature = [Signal(7, name=f"hbm_sw_temperature_{i}") for i in range(2)]
         self.sw_temperature_valid = Signal(2, name="hbm_sw_temperature_valid")
         self.raw_temperature = [Signal(3, name=f"hbm_raw_temperature_{i}") for i in range(2)]
