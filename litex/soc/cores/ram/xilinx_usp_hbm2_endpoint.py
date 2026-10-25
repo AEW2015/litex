@@ -60,7 +60,7 @@ class HBMWriteUnpacker(LiteXModule):
     The producer holds the wide word until its upper slice is consumed,
     including an internally dropped upper tail after an odd final beat.
     """
-    def __init__(self, *, clock_domain="sys"):
+    def __init__(self, *, clock_domain="sys", control_prefix=""):
         self.sink   = sink   = stream.Endpoint([("data", 512), ("strb", 64), ("keep", 64)])
         self.source = source = stream.Endpoint([("data", 256), ("strb", 32), ("keep", 32)])
         self.index    = index    = Signal()
@@ -84,12 +84,12 @@ class HBMWriteUnpacker(LiteXModule):
 
         self.submodules.index_control = HBMSynchronousControlRegister(
             index, ~index, transfer,
-            domain=clock_domain, name="window_write_unpack_index")
+            domain=clock_domain, name=control_prefix + "window_write_unpack_index")
         # Upper-slice completion clears drop with priority; lower-slice early
         # termination sets it. Otherwise retain the old value, as StrideConverter.
         self.submodules.drop_control = HBMSynchronousControlRegister(
             drop, Mux(index, 0, Mux(packet_end, 1, drop)), transfer,
-            domain=clock_domain, name="window_write_unpack_drop")
+            domain=clock_domain, name=control_prefix + "window_write_unpack_drop")
 
 
 class HBMRegisteredReadCDC(LiteXModule):
@@ -167,7 +167,12 @@ class HBMRegisteredReadCDC(LiteXModule):
 
 class HBMWideEndpoint(LiteXModule):
     def __init__(self, *, app_domain="sys", native_domain="axi", address_width=33,
-                 id_width=6, fifo_depth=4, gray_bus_prefix=None, max_outstanding=1):
+                 id_width=6, fifo_depth=4, gray_bus_prefix=None, max_outstanding=1,
+                 control_prefix=""):
+        # Control instance names must be unique when multiple windows coexist;
+        # Gray publication tags retain their separate caller-selected prefix.
+        if not isinstance(control_prefix, str):
+            raise ValueError("The control prefix must be a string")
         self.max_outstanding = max_outstanding
         if max_outstanding not in (1, 4):
             raise ValueError("The endpoint supports one or four outstanding descriptors")
@@ -175,7 +180,8 @@ class HBMWideEndpoint(LiteXModule):
             self.submodules.window = window = _HBMWindowFourEndpoint(
                 app_domain=app_domain, native_domain=native_domain,
                 address_width=address_width, id_width=id_width,
-                fifo_depth=fifo_depth, gray_bus_prefix=gray_bus_prefix)
+                fifo_depth=fifo_depth, gray_bus_prefix=gray_bus_prefix,
+                control_prefix=control_prefix)
             for name in ("aw", "ar", "w", "b", "r", "native", "quiesce", "drained",
                          "quiesced", "protocol_error", "write_pending", "read_pending",
                          "link_ready", "write_credits", "read_credits"):
@@ -390,7 +396,7 @@ class _HBMWindowFourEndpoint(LiteXModule):
     only at application consumption. This is not an AXI reordering engine.
     """
     def __init__(self, *, app_domain, native_domain, address_width, id_width,
-                 fifo_depth, gray_bus_prefix):
+                 fifo_depth, gray_bus_prefix, control_prefix):
         if app_domain == native_domain or address_width < 12 or id_width < 1 or fifo_depth != 4:
             raise ValueError("Window four requires distinct domains, address>=12, ID>=1 and depth four")
         desc = [("addr", address_width), ("len", 4), ("id", id_width)]
@@ -477,7 +483,8 @@ class _HBMWindowFourEndpoint(LiteXModule):
                     If(self.w.last != (app_left <= 2), app_error.eq(1))),
                 If(app_terminal, app_w_active.eq(0), app_left.eq(0)),
                 If(load_length, app_w_active.eq(1), app_left.eq(lengths.source.len + 1), app_first.eq(1))]
-        self.submodules.unpack = unpack = HBMWriteUnpacker(clock_domain=native_domain)
+        self.submodules.unpack = unpack = HBMWriteUnpacker(
+            clock_domain=native_domain, control_prefix=control_prefix)
         self.submodules.pack = pack = ClockDomainsRenamer(native_domain)(stream.StrideConverter(small_r, wide_r))
         self.submodules.write_elastic = elastic = ClockDomainsRenamer(native_domain)(stream.Buffer(wide_w, pipe_valid=False, pipe_ready=True))
         self.comb += [w.source.connect(elastic.sink), elastic.source.connect(unpack.sink), pack.source.connect(r.sink)]
@@ -496,7 +503,8 @@ class _HBMWindowFourEndpoint(LiteXModule):
                 updates.append(accepted[bit] | (dst.valid & dst.ready))
             self.comb += src.ready.eq(done)
             setattr(self.submodules, role + "_control", HBMSynchronousControlRegister(
-                accepted, Mux(done, 0, Cat(*updates)), 1, domain=native_domain, name="window_" + role))
+                accepted, Mux(done, 0, Cat(*updates)), 1, domain=native_domain,
+                name=control_prefix + "window_" + role))
         tokens = {name:queue(name + "_accepted", [("token", 1)], native_domain) for name in ("aw", "w", "ar")}
         buffers = {}
         for name in ("aw", "w", "ar", "b", "r"):
@@ -524,7 +532,8 @@ class _HBMWindowFourEndpoint(LiteXModule):
             wb.source.ready.eq(n.w.ready & (~wb.source.last | tokens["w"].sink.ready)),
             tokens["w"].sink.valid.eq(n.w.valid & n.w.ready & n.w.last), tokens["w"].sink.token.eq(1)]
         def control(q, d, ce, name):
-            setattr(self.submodules, name + "_control", HBMSynchronousControlRegister(q, d, ce, domain=native_domain, name="window_" + name))
+            setattr(self.submodules, name + "_control", HBMSynchronousControlRegister(
+                q, d, ce, domain=native_domain, name=control_prefix + "window_" + name))
         control(wa, Mux(w_load, 1, 0), w_load | w_terminal, "write_active")
         control(wl, Mux(w_load, w_issue.source.len + 1, wl - 1), w_load | w_issue_fire, "write_left")
         control(wid, w_issue.source.id, w_load, "write_id")

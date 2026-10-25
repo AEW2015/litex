@@ -1,6 +1,7 @@
 """Application-side traffic and data checking for the ordered HBM endpoint.
 
-The default region is PC31 local 0x200000..0x3fffff. The legacy profile uses
+The default region is PC31 local 0x200000..0x3fffff; port selects another
+pseudo-channel without changing that local scratch range. The legacy profile uses
 16 native beats and eight 512-bit application words per command. SEED writes the whole region once;
 WRITE, READ and MIXED offer commands for a captured number of SYS clocks. READ
 and MIXED require a completed SEED with the same seed. A mixed write stores the
@@ -31,11 +32,15 @@ from litex.soc.interconnect.csr import CSRStatus, CSRStorage
 
 
 class HBMEndpointTrafficCSR(LiteXModule):
-    def __init__(self, endpoint, *, region_bursts=4096):
+    def __init__(self, endpoint, *, region_bursts=4096, port=31, name_prefix=None):
         if endpoint.max_outstanding != 4 or len(endpoint.aw.addr) != 33 or len(endpoint.aw.id) != 6:
             raise ValueError("Traffic requires the four-command address33/ID6 endpoint")
         if region_bursts < 1 or region_bursts > 4096 or region_bursts & (region_bursts - 1):
             raise ValueError("The region must contain a power of two from 1 to 4096 bursts")
+        if type(port) is not int or not 0 <= port <= 31:
+            raise ValueError("The port must be an integer from 0 to 31")
+        if name_prefix is not None and (not isinstance(name_prefix, str) or not name_prefix):
+            raise ValueError("The name prefix must be a nonempty string")
         self.admission_enable = Signal()
         self.stop = Signal()
         self.endpoint_quiesce = Signal()
@@ -73,6 +78,9 @@ class HBMEndpointTrafficCSR(LiteXModule):
             status(name, 32)
         # Append-only extension: the original 24 CSR offsets remain unchanged.
         storage("config_random", 1)
+        if name_prefix is not None:
+            for name in ("config_mode", "config_cycles", "config_seed", "config_random"):
+                getattr(self, name).storage.name_override = name_prefix + "_" + name
         enabled_bytes = Signal(64)
         self.comb += [status("write_enabled_bytes_lo", 32).status.eq(enabled_bytes[:32]),
                       status("write_enabled_bytes_hi", 32).status.eq(enabled_bytes[32:])]
@@ -279,9 +287,9 @@ class HBMEndpointTrafficCSR(LiteXModule):
             If(busy & closing, stop_pending.eq(1)),
             If(issue & ((mode == 0) | (mode == 1) | (mode == 3) | (mode == 4)) &
                 ~aw_offer & writes.sink.ready & write_times.sink.ready,
-                aw_offer.eq(1), aw_address.eq((31 << 28) + 0x200000 + (aw_slot << 9)), aw_length.eq(aw_pick_length)),
+                aw_offer.eq(1), aw_address.eq((port << 28) + 0x200000 + (aw_slot << 9)), aw_length.eq(aw_pick_length)),
             If(issue & ((mode == 2) | (mode == 3) | (mode == 5)) & ~ar_offer & reads.sink.ready,
-                ar_offer.eq(1), ar_address.eq((31 << 28) + 0x200000 + (ar_slot << 9)), ar_length.eq(ar_pick_length)),
+                ar_offer.eq(1), ar_address.eq((port << 28) + 0x200000 + (ar_slot << 9)), ar_length.eq(ar_pick_length)),
             If(aw_fire, aw_offer.eq(0), aw_random.eq(next_aw),
                 If(aw_index == region_bursts - 1, aw_index.eq(0)).Else(aw_index.eq(aw_index + 1))),
             If(ar_fire, ar_offer.eq(0), ar_random.eq(next_ar),
