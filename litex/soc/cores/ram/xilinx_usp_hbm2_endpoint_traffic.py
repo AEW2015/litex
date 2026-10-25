@@ -24,7 +24,7 @@ unchanged. VERIFY always reads every byte. Timed writes preserve this known
 image, making simultaneous reads race-free. Partial epochs invalidate it.
 """
 
-from migen import Case, Cat, If, Mux, Replicate, Signal
+from migen import Case, Cat, Constant, If, Mux, Replicate, Signal
 
 from litex.gen import LiteXModule
 from litex.soc.interconnect import stream
@@ -337,12 +337,23 @@ class HBMEndpointTrafficCSR(LiteXModule):
         while len(terms) > 1:
             terms = [terms[i] + terms[i + 1] for i in range(0, len(terms), 2)]
         byte_count = terms[0]
+        # At most 64 bytes arrive per word. Keep the low-word carry separate
+        # from the high-word increment and saturate only the low word: the
+        # high word already contains all ones when the whole count overflows.
+        enabled_low_sum = Signal(33)
+        enabled_high_full = Signal()
+        self.comb += [
+            enabled_low_sum.eq(Cat(enabled_bytes[:32], Constant(0, 1)) + byte_count),
+            enabled_high_full.eq(enabled_bytes[32:] == 0xffffffff),
+        ]
         self.sync += [
             If(start_accept, enabled_bytes.eq(0), aw_seen.eq(0), ar_seen.eq(0)).Else(
                 If(w_fire,
-                    If(enabled_bytes <= (1 << 64) - 1 - byte_count,
-                        enabled_bytes.eq(enabled_bytes + byte_count)).Else(
-                        enabled_bytes.eq((1 << 64) - 1), overflow.eq(1))),
+                    If(enabled_low_sum[32] & enabled_high_full,
+                        enabled_bytes[:32].eq(0xffffffff), overflow.eq(1)
+                    ).Else(enabled_bytes[:32].eq(enabled_low_sum[:32])),
+                    If(enabled_low_sum[32] & ~enabled_high_full,
+                        enabled_bytes[32:].eq(enabled_bytes[32:] + 1))),
                 If(aw_fire, aw_seen.eq(aw_seen | (1 << aw_length))),
                 If(ar_fire, ar_seen.eq(ar_seen | (1 << ar_length)))),
         ]
