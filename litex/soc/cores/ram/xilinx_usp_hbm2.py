@@ -376,6 +376,8 @@ class PrimitiveHBM2(USPHBM2):
                          axi_clk_freq=axi_clk_freq, ref_clk_freq=ref_clk_freq,
                          apb_clk_freq=apb_clk_freq, generate_ip=False,
                          xci_path=None, ip_config={})
+        if experimental_500_1000:
+            self.hbm_params["p_NATIVE_READY_RESET"] = 1
 
         # Constants describe the boot profile and supported tool model, not a
         # measured clock. Firmware reports the active destructive profile.

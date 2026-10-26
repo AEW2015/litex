@@ -1,13 +1,16 @@
-// FK33 fixed 250 MHz AXI / 100 MHz APB / 200 MHz reference; 900 MHz HBM boot.
-// Software supports 800/900 MHz only by destructive reset and recalibration.
-// The primitive tool model remains 1800 MT/s, covering the maximum boot rate.
+// FK33 default: 250 MHz AXI / 100 MHz APB / 200 MHz reference; 900 MHz HBM boot.
+// Normal software profiles support 800/900 MHz by destructive reset and recalibration.
+// The primitive tool model remains 1800 MT/s; experimental clocks are unqualified.
 // Replaces only the generated hbm_0 boundary. No XCI initializer is instantiated.
 // Software must initialize/calibrate both stacks before asserting sw_ready.
 // sw_ready and temperature shadows originate in the SoC SYS clock domain.
 // The enclosing management path rejects memory accesses before READY.
 // Temperature 127 is an invalid sentinel, never a converted raw temperature code.
 `timescale 1ns/1ps
-module hbm_0 (
+module hbm_0 #(
+    // Opt-in local reset: asynchronous fault assertion, two clean native edges to release.
+    parameter integer NATIVE_READY_RESET = 0
+) (
     input wire HBM_REF_CLK_0,
     input wire HBM_REF_CLK_1,
     input wire AXI_00_ACLK,
@@ -1110,10 +1113,12 @@ always @(posedge APB_0_PCLK or posedge DRAM_0_STAT_CATTRIP)
     if (DRAM_0_STAT_CATTRIP) trip_hold_00 <= 1'b1;
     else trip_hold_00 <= 1'b0;
 (* ASYNC_REG = "TRUE" *) reg [1:0] permit_00 = 2'b00;
-always @(posedge AXI_00_ACLK or negedge AXI_00_ARESET_N or posedge trip_hold_00)
-    if (!AXI_00_ARESET_N || trip_hold_00) permit_00 <= 2'b00;
-    else permit_00 <= {permit_00[0], sw_ready[0]};
-wire enabled_00 = permit_00[1] & sw_ready[0];
+wire ready_reset_00 = NATIVE_READY_RESET && !sw_ready[0];
+always @(posedge AXI_00_ACLK or negedge AXI_00_ARESET_N or
+        posedge trip_hold_00 or posedge ready_reset_00)
+    if (!AXI_00_ARESET_N || trip_hold_00 || ready_reset_00) permit_00 <= 2'b00;
+    else permit_00 <= {permit_00[0], NATIVE_READY_RESET ? 1'b1 : sw_ready[0]};
+wire enabled_00 = NATIVE_READY_RESET ? permit_00[1] : permit_00[1] & sw_ready[0];
 wire primitive_AXI_00_ARREADY;
 assign AXI_00_ARREADY = primitive_AXI_00_ARREADY & enabled_00;
 wire primitive_AXI_00_AWREADY;
@@ -1132,10 +1137,12 @@ always @(posedge APB_0_PCLK or posedge DRAM_0_STAT_CATTRIP)
     if (DRAM_0_STAT_CATTRIP) trip_hold_01 <= 1'b1;
     else trip_hold_01 <= 1'b0;
 (* ASYNC_REG = "TRUE" *) reg [1:0] permit_01 = 2'b00;
-always @(posedge AXI_01_ACLK or negedge AXI_01_ARESET_N or posedge trip_hold_01)
-    if (!AXI_01_ARESET_N || trip_hold_01) permit_01 <= 2'b00;
-    else permit_01 <= {permit_01[0], sw_ready[0]};
-wire enabled_01 = permit_01[1] & sw_ready[0];
+wire ready_reset_01 = NATIVE_READY_RESET && !sw_ready[0];
+always @(posedge AXI_01_ACLK or negedge AXI_01_ARESET_N or
+        posedge trip_hold_01 or posedge ready_reset_01)
+    if (!AXI_01_ARESET_N || trip_hold_01 || ready_reset_01) permit_01 <= 2'b00;
+    else permit_01 <= {permit_01[0], NATIVE_READY_RESET ? 1'b1 : sw_ready[0]};
+wire enabled_01 = NATIVE_READY_RESET ? permit_01[1] : permit_01[1] & sw_ready[0];
 wire primitive_AXI_01_ARREADY;
 assign AXI_01_ARREADY = primitive_AXI_01_ARREADY & enabled_01;
 wire primitive_AXI_01_AWREADY;
@@ -1154,10 +1161,12 @@ always @(posedge APB_0_PCLK or posedge DRAM_0_STAT_CATTRIP)
     if (DRAM_0_STAT_CATTRIP) trip_hold_02 <= 1'b1;
     else trip_hold_02 <= 1'b0;
 (* ASYNC_REG = "TRUE" *) reg [1:0] permit_02 = 2'b00;
-always @(posedge AXI_02_ACLK or negedge AXI_02_ARESET_N or posedge trip_hold_02)
-    if (!AXI_02_ARESET_N || trip_hold_02) permit_02 <= 2'b00;
-    else permit_02 <= {permit_02[0], sw_ready[0]};
-wire enabled_02 = permit_02[1] & sw_ready[0];
+wire ready_reset_02 = NATIVE_READY_RESET && !sw_ready[0];
+always @(posedge AXI_02_ACLK or negedge AXI_02_ARESET_N or
+        posedge trip_hold_02 or posedge ready_reset_02)
+    if (!AXI_02_ARESET_N || trip_hold_02 || ready_reset_02) permit_02 <= 2'b00;
+    else permit_02 <= {permit_02[0], NATIVE_READY_RESET ? 1'b1 : sw_ready[0]};
+wire enabled_02 = NATIVE_READY_RESET ? permit_02[1] : permit_02[1] & sw_ready[0];
 wire primitive_AXI_02_ARREADY;
 assign AXI_02_ARREADY = primitive_AXI_02_ARREADY & enabled_02;
 wire primitive_AXI_02_AWREADY;
@@ -1176,10 +1185,12 @@ always @(posedge APB_0_PCLK or posedge DRAM_0_STAT_CATTRIP)
     if (DRAM_0_STAT_CATTRIP) trip_hold_03 <= 1'b1;
     else trip_hold_03 <= 1'b0;
 (* ASYNC_REG = "TRUE" *) reg [1:0] permit_03 = 2'b00;
-always @(posedge AXI_03_ACLK or negedge AXI_03_ARESET_N or posedge trip_hold_03)
-    if (!AXI_03_ARESET_N || trip_hold_03) permit_03 <= 2'b00;
-    else permit_03 <= {permit_03[0], sw_ready[0]};
-wire enabled_03 = permit_03[1] & sw_ready[0];
+wire ready_reset_03 = NATIVE_READY_RESET && !sw_ready[0];
+always @(posedge AXI_03_ACLK or negedge AXI_03_ARESET_N or
+        posedge trip_hold_03 or posedge ready_reset_03)
+    if (!AXI_03_ARESET_N || trip_hold_03 || ready_reset_03) permit_03 <= 2'b00;
+    else permit_03 <= {permit_03[0], NATIVE_READY_RESET ? 1'b1 : sw_ready[0]};
+wire enabled_03 = NATIVE_READY_RESET ? permit_03[1] : permit_03[1] & sw_ready[0];
 wire primitive_AXI_03_ARREADY;
 assign AXI_03_ARREADY = primitive_AXI_03_ARREADY & enabled_03;
 wire primitive_AXI_03_AWREADY;
@@ -1198,10 +1209,12 @@ always @(posedge APB_0_PCLK or posedge DRAM_0_STAT_CATTRIP)
     if (DRAM_0_STAT_CATTRIP) trip_hold_04 <= 1'b1;
     else trip_hold_04 <= 1'b0;
 (* ASYNC_REG = "TRUE" *) reg [1:0] permit_04 = 2'b00;
-always @(posedge AXI_04_ACLK or negedge AXI_04_ARESET_N or posedge trip_hold_04)
-    if (!AXI_04_ARESET_N || trip_hold_04) permit_04 <= 2'b00;
-    else permit_04 <= {permit_04[0], sw_ready[0]};
-wire enabled_04 = permit_04[1] & sw_ready[0];
+wire ready_reset_04 = NATIVE_READY_RESET && !sw_ready[0];
+always @(posedge AXI_04_ACLK or negedge AXI_04_ARESET_N or
+        posedge trip_hold_04 or posedge ready_reset_04)
+    if (!AXI_04_ARESET_N || trip_hold_04 || ready_reset_04) permit_04 <= 2'b00;
+    else permit_04 <= {permit_04[0], NATIVE_READY_RESET ? 1'b1 : sw_ready[0]};
+wire enabled_04 = NATIVE_READY_RESET ? permit_04[1] : permit_04[1] & sw_ready[0];
 wire primitive_AXI_04_ARREADY;
 assign AXI_04_ARREADY = primitive_AXI_04_ARREADY & enabled_04;
 wire primitive_AXI_04_AWREADY;
@@ -1220,10 +1233,12 @@ always @(posedge APB_0_PCLK or posedge DRAM_0_STAT_CATTRIP)
     if (DRAM_0_STAT_CATTRIP) trip_hold_05 <= 1'b1;
     else trip_hold_05 <= 1'b0;
 (* ASYNC_REG = "TRUE" *) reg [1:0] permit_05 = 2'b00;
-always @(posedge AXI_05_ACLK or negedge AXI_05_ARESET_N or posedge trip_hold_05)
-    if (!AXI_05_ARESET_N || trip_hold_05) permit_05 <= 2'b00;
-    else permit_05 <= {permit_05[0], sw_ready[0]};
-wire enabled_05 = permit_05[1] & sw_ready[0];
+wire ready_reset_05 = NATIVE_READY_RESET && !sw_ready[0];
+always @(posedge AXI_05_ACLK or negedge AXI_05_ARESET_N or
+        posedge trip_hold_05 or posedge ready_reset_05)
+    if (!AXI_05_ARESET_N || trip_hold_05 || ready_reset_05) permit_05 <= 2'b00;
+    else permit_05 <= {permit_05[0], NATIVE_READY_RESET ? 1'b1 : sw_ready[0]};
+wire enabled_05 = NATIVE_READY_RESET ? permit_05[1] : permit_05[1] & sw_ready[0];
 wire primitive_AXI_05_ARREADY;
 assign AXI_05_ARREADY = primitive_AXI_05_ARREADY & enabled_05;
 wire primitive_AXI_05_AWREADY;
@@ -1242,10 +1257,12 @@ always @(posedge APB_0_PCLK or posedge DRAM_0_STAT_CATTRIP)
     if (DRAM_0_STAT_CATTRIP) trip_hold_06 <= 1'b1;
     else trip_hold_06 <= 1'b0;
 (* ASYNC_REG = "TRUE" *) reg [1:0] permit_06 = 2'b00;
-always @(posedge AXI_06_ACLK or negedge AXI_06_ARESET_N or posedge trip_hold_06)
-    if (!AXI_06_ARESET_N || trip_hold_06) permit_06 <= 2'b00;
-    else permit_06 <= {permit_06[0], sw_ready[0]};
-wire enabled_06 = permit_06[1] & sw_ready[0];
+wire ready_reset_06 = NATIVE_READY_RESET && !sw_ready[0];
+always @(posedge AXI_06_ACLK or negedge AXI_06_ARESET_N or
+        posedge trip_hold_06 or posedge ready_reset_06)
+    if (!AXI_06_ARESET_N || trip_hold_06 || ready_reset_06) permit_06 <= 2'b00;
+    else permit_06 <= {permit_06[0], NATIVE_READY_RESET ? 1'b1 : sw_ready[0]};
+wire enabled_06 = NATIVE_READY_RESET ? permit_06[1] : permit_06[1] & sw_ready[0];
 wire primitive_AXI_06_ARREADY;
 assign AXI_06_ARREADY = primitive_AXI_06_ARREADY & enabled_06;
 wire primitive_AXI_06_AWREADY;
@@ -1264,10 +1281,12 @@ always @(posedge APB_0_PCLK or posedge DRAM_0_STAT_CATTRIP)
     if (DRAM_0_STAT_CATTRIP) trip_hold_07 <= 1'b1;
     else trip_hold_07 <= 1'b0;
 (* ASYNC_REG = "TRUE" *) reg [1:0] permit_07 = 2'b00;
-always @(posedge AXI_07_ACLK or negedge AXI_07_ARESET_N or posedge trip_hold_07)
-    if (!AXI_07_ARESET_N || trip_hold_07) permit_07 <= 2'b00;
-    else permit_07 <= {permit_07[0], sw_ready[0]};
-wire enabled_07 = permit_07[1] & sw_ready[0];
+wire ready_reset_07 = NATIVE_READY_RESET && !sw_ready[0];
+always @(posedge AXI_07_ACLK or negedge AXI_07_ARESET_N or
+        posedge trip_hold_07 or posedge ready_reset_07)
+    if (!AXI_07_ARESET_N || trip_hold_07 || ready_reset_07) permit_07 <= 2'b00;
+    else permit_07 <= {permit_07[0], NATIVE_READY_RESET ? 1'b1 : sw_ready[0]};
+wire enabled_07 = NATIVE_READY_RESET ? permit_07[1] : permit_07[1] & sw_ready[0];
 wire primitive_AXI_07_ARREADY;
 assign AXI_07_ARREADY = primitive_AXI_07_ARREADY & enabled_07;
 wire primitive_AXI_07_AWREADY;
@@ -1286,10 +1305,12 @@ always @(posedge APB_0_PCLK or posedge DRAM_0_STAT_CATTRIP)
     if (DRAM_0_STAT_CATTRIP) trip_hold_08 <= 1'b1;
     else trip_hold_08 <= 1'b0;
 (* ASYNC_REG = "TRUE" *) reg [1:0] permit_08 = 2'b00;
-always @(posedge AXI_08_ACLK or negedge AXI_08_ARESET_N or posedge trip_hold_08)
-    if (!AXI_08_ARESET_N || trip_hold_08) permit_08 <= 2'b00;
-    else permit_08 <= {permit_08[0], sw_ready[0]};
-wire enabled_08 = permit_08[1] & sw_ready[0];
+wire ready_reset_08 = NATIVE_READY_RESET && !sw_ready[0];
+always @(posedge AXI_08_ACLK or negedge AXI_08_ARESET_N or
+        posedge trip_hold_08 or posedge ready_reset_08)
+    if (!AXI_08_ARESET_N || trip_hold_08 || ready_reset_08) permit_08 <= 2'b00;
+    else permit_08 <= {permit_08[0], NATIVE_READY_RESET ? 1'b1 : sw_ready[0]};
+wire enabled_08 = NATIVE_READY_RESET ? permit_08[1] : permit_08[1] & sw_ready[0];
 wire primitive_AXI_08_ARREADY;
 assign AXI_08_ARREADY = primitive_AXI_08_ARREADY & enabled_08;
 wire primitive_AXI_08_AWREADY;
@@ -1308,10 +1329,12 @@ always @(posedge APB_0_PCLK or posedge DRAM_0_STAT_CATTRIP)
     if (DRAM_0_STAT_CATTRIP) trip_hold_09 <= 1'b1;
     else trip_hold_09 <= 1'b0;
 (* ASYNC_REG = "TRUE" *) reg [1:0] permit_09 = 2'b00;
-always @(posedge AXI_09_ACLK or negedge AXI_09_ARESET_N or posedge trip_hold_09)
-    if (!AXI_09_ARESET_N || trip_hold_09) permit_09 <= 2'b00;
-    else permit_09 <= {permit_09[0], sw_ready[0]};
-wire enabled_09 = permit_09[1] & sw_ready[0];
+wire ready_reset_09 = NATIVE_READY_RESET && !sw_ready[0];
+always @(posedge AXI_09_ACLK or negedge AXI_09_ARESET_N or
+        posedge trip_hold_09 or posedge ready_reset_09)
+    if (!AXI_09_ARESET_N || trip_hold_09 || ready_reset_09) permit_09 <= 2'b00;
+    else permit_09 <= {permit_09[0], NATIVE_READY_RESET ? 1'b1 : sw_ready[0]};
+wire enabled_09 = NATIVE_READY_RESET ? permit_09[1] : permit_09[1] & sw_ready[0];
 wire primitive_AXI_09_ARREADY;
 assign AXI_09_ARREADY = primitive_AXI_09_ARREADY & enabled_09;
 wire primitive_AXI_09_AWREADY;
@@ -1330,10 +1353,12 @@ always @(posedge APB_0_PCLK or posedge DRAM_0_STAT_CATTRIP)
     if (DRAM_0_STAT_CATTRIP) trip_hold_10 <= 1'b1;
     else trip_hold_10 <= 1'b0;
 (* ASYNC_REG = "TRUE" *) reg [1:0] permit_10 = 2'b00;
-always @(posedge AXI_10_ACLK or negedge AXI_10_ARESET_N or posedge trip_hold_10)
-    if (!AXI_10_ARESET_N || trip_hold_10) permit_10 <= 2'b00;
-    else permit_10 <= {permit_10[0], sw_ready[0]};
-wire enabled_10 = permit_10[1] & sw_ready[0];
+wire ready_reset_10 = NATIVE_READY_RESET && !sw_ready[0];
+always @(posedge AXI_10_ACLK or negedge AXI_10_ARESET_N or
+        posedge trip_hold_10 or posedge ready_reset_10)
+    if (!AXI_10_ARESET_N || trip_hold_10 || ready_reset_10) permit_10 <= 2'b00;
+    else permit_10 <= {permit_10[0], NATIVE_READY_RESET ? 1'b1 : sw_ready[0]};
+wire enabled_10 = NATIVE_READY_RESET ? permit_10[1] : permit_10[1] & sw_ready[0];
 wire primitive_AXI_10_ARREADY;
 assign AXI_10_ARREADY = primitive_AXI_10_ARREADY & enabled_10;
 wire primitive_AXI_10_AWREADY;
@@ -1352,10 +1377,12 @@ always @(posedge APB_0_PCLK or posedge DRAM_0_STAT_CATTRIP)
     if (DRAM_0_STAT_CATTRIP) trip_hold_11 <= 1'b1;
     else trip_hold_11 <= 1'b0;
 (* ASYNC_REG = "TRUE" *) reg [1:0] permit_11 = 2'b00;
-always @(posedge AXI_11_ACLK or negedge AXI_11_ARESET_N or posedge trip_hold_11)
-    if (!AXI_11_ARESET_N || trip_hold_11) permit_11 <= 2'b00;
-    else permit_11 <= {permit_11[0], sw_ready[0]};
-wire enabled_11 = permit_11[1] & sw_ready[0];
+wire ready_reset_11 = NATIVE_READY_RESET && !sw_ready[0];
+always @(posedge AXI_11_ACLK or negedge AXI_11_ARESET_N or
+        posedge trip_hold_11 or posedge ready_reset_11)
+    if (!AXI_11_ARESET_N || trip_hold_11 || ready_reset_11) permit_11 <= 2'b00;
+    else permit_11 <= {permit_11[0], NATIVE_READY_RESET ? 1'b1 : sw_ready[0]};
+wire enabled_11 = NATIVE_READY_RESET ? permit_11[1] : permit_11[1] & sw_ready[0];
 wire primitive_AXI_11_ARREADY;
 assign AXI_11_ARREADY = primitive_AXI_11_ARREADY & enabled_11;
 wire primitive_AXI_11_AWREADY;
@@ -1374,10 +1401,12 @@ always @(posedge APB_0_PCLK or posedge DRAM_0_STAT_CATTRIP)
     if (DRAM_0_STAT_CATTRIP) trip_hold_12 <= 1'b1;
     else trip_hold_12 <= 1'b0;
 (* ASYNC_REG = "TRUE" *) reg [1:0] permit_12 = 2'b00;
-always @(posedge AXI_12_ACLK or negedge AXI_12_ARESET_N or posedge trip_hold_12)
-    if (!AXI_12_ARESET_N || trip_hold_12) permit_12 <= 2'b00;
-    else permit_12 <= {permit_12[0], sw_ready[0]};
-wire enabled_12 = permit_12[1] & sw_ready[0];
+wire ready_reset_12 = NATIVE_READY_RESET && !sw_ready[0];
+always @(posedge AXI_12_ACLK or negedge AXI_12_ARESET_N or
+        posedge trip_hold_12 or posedge ready_reset_12)
+    if (!AXI_12_ARESET_N || trip_hold_12 || ready_reset_12) permit_12 <= 2'b00;
+    else permit_12 <= {permit_12[0], NATIVE_READY_RESET ? 1'b1 : sw_ready[0]};
+wire enabled_12 = NATIVE_READY_RESET ? permit_12[1] : permit_12[1] & sw_ready[0];
 wire primitive_AXI_12_ARREADY;
 assign AXI_12_ARREADY = primitive_AXI_12_ARREADY & enabled_12;
 wire primitive_AXI_12_AWREADY;
@@ -1396,10 +1425,12 @@ always @(posedge APB_0_PCLK or posedge DRAM_0_STAT_CATTRIP)
     if (DRAM_0_STAT_CATTRIP) trip_hold_13 <= 1'b1;
     else trip_hold_13 <= 1'b0;
 (* ASYNC_REG = "TRUE" *) reg [1:0] permit_13 = 2'b00;
-always @(posedge AXI_13_ACLK or negedge AXI_13_ARESET_N or posedge trip_hold_13)
-    if (!AXI_13_ARESET_N || trip_hold_13) permit_13 <= 2'b00;
-    else permit_13 <= {permit_13[0], sw_ready[0]};
-wire enabled_13 = permit_13[1] & sw_ready[0];
+wire ready_reset_13 = NATIVE_READY_RESET && !sw_ready[0];
+always @(posedge AXI_13_ACLK or negedge AXI_13_ARESET_N or
+        posedge trip_hold_13 or posedge ready_reset_13)
+    if (!AXI_13_ARESET_N || trip_hold_13 || ready_reset_13) permit_13 <= 2'b00;
+    else permit_13 <= {permit_13[0], NATIVE_READY_RESET ? 1'b1 : sw_ready[0]};
+wire enabled_13 = NATIVE_READY_RESET ? permit_13[1] : permit_13[1] & sw_ready[0];
 wire primitive_AXI_13_ARREADY;
 assign AXI_13_ARREADY = primitive_AXI_13_ARREADY & enabled_13;
 wire primitive_AXI_13_AWREADY;
@@ -1418,10 +1449,12 @@ always @(posedge APB_0_PCLK or posedge DRAM_0_STAT_CATTRIP)
     if (DRAM_0_STAT_CATTRIP) trip_hold_14 <= 1'b1;
     else trip_hold_14 <= 1'b0;
 (* ASYNC_REG = "TRUE" *) reg [1:0] permit_14 = 2'b00;
-always @(posedge AXI_14_ACLK or negedge AXI_14_ARESET_N or posedge trip_hold_14)
-    if (!AXI_14_ARESET_N || trip_hold_14) permit_14 <= 2'b00;
-    else permit_14 <= {permit_14[0], sw_ready[0]};
-wire enabled_14 = permit_14[1] & sw_ready[0];
+wire ready_reset_14 = NATIVE_READY_RESET && !sw_ready[0];
+always @(posedge AXI_14_ACLK or negedge AXI_14_ARESET_N or
+        posedge trip_hold_14 or posedge ready_reset_14)
+    if (!AXI_14_ARESET_N || trip_hold_14 || ready_reset_14) permit_14 <= 2'b00;
+    else permit_14 <= {permit_14[0], NATIVE_READY_RESET ? 1'b1 : sw_ready[0]};
+wire enabled_14 = NATIVE_READY_RESET ? permit_14[1] : permit_14[1] & sw_ready[0];
 wire primitive_AXI_14_ARREADY;
 assign AXI_14_ARREADY = primitive_AXI_14_ARREADY & enabled_14;
 wire primitive_AXI_14_AWREADY;
@@ -1440,10 +1473,12 @@ always @(posedge APB_0_PCLK or posedge DRAM_0_STAT_CATTRIP)
     if (DRAM_0_STAT_CATTRIP) trip_hold_15 <= 1'b1;
     else trip_hold_15 <= 1'b0;
 (* ASYNC_REG = "TRUE" *) reg [1:0] permit_15 = 2'b00;
-always @(posedge AXI_15_ACLK or negedge AXI_15_ARESET_N or posedge trip_hold_15)
-    if (!AXI_15_ARESET_N || trip_hold_15) permit_15 <= 2'b00;
-    else permit_15 <= {permit_15[0], sw_ready[0]};
-wire enabled_15 = permit_15[1] & sw_ready[0];
+wire ready_reset_15 = NATIVE_READY_RESET && !sw_ready[0];
+always @(posedge AXI_15_ACLK or negedge AXI_15_ARESET_N or
+        posedge trip_hold_15 or posedge ready_reset_15)
+    if (!AXI_15_ARESET_N || trip_hold_15 || ready_reset_15) permit_15 <= 2'b00;
+    else permit_15 <= {permit_15[0], NATIVE_READY_RESET ? 1'b1 : sw_ready[0]};
+wire enabled_15 = NATIVE_READY_RESET ? permit_15[1] : permit_15[1] & sw_ready[0];
 wire primitive_AXI_15_ARREADY;
 assign AXI_15_ARREADY = primitive_AXI_15_ARREADY & enabled_15;
 wire primitive_AXI_15_AWREADY;
@@ -1462,10 +1497,12 @@ always @(posedge APB_1_PCLK or posedge DRAM_1_STAT_CATTRIP)
     if (DRAM_1_STAT_CATTRIP) trip_hold_16 <= 1'b1;
     else trip_hold_16 <= 1'b0;
 (* ASYNC_REG = "TRUE" *) reg [1:0] permit_16 = 2'b00;
-always @(posedge AXI_16_ACLK or negedge AXI_16_ARESET_N or posedge trip_hold_16)
-    if (!AXI_16_ARESET_N || trip_hold_16) permit_16 <= 2'b00;
-    else permit_16 <= {permit_16[0], sw_ready[1]};
-wire enabled_16 = permit_16[1] & sw_ready[1];
+wire ready_reset_16 = NATIVE_READY_RESET && !sw_ready[1];
+always @(posedge AXI_16_ACLK or negedge AXI_16_ARESET_N or
+        posedge trip_hold_16 or posedge ready_reset_16)
+    if (!AXI_16_ARESET_N || trip_hold_16 || ready_reset_16) permit_16 <= 2'b00;
+    else permit_16 <= {permit_16[0], NATIVE_READY_RESET ? 1'b1 : sw_ready[1]};
+wire enabled_16 = NATIVE_READY_RESET ? permit_16[1] : permit_16[1] & sw_ready[1];
 wire primitive_AXI_16_ARREADY;
 assign AXI_16_ARREADY = primitive_AXI_16_ARREADY & enabled_16;
 wire primitive_AXI_16_AWREADY;
@@ -1484,10 +1521,12 @@ always @(posedge APB_1_PCLK or posedge DRAM_1_STAT_CATTRIP)
     if (DRAM_1_STAT_CATTRIP) trip_hold_17 <= 1'b1;
     else trip_hold_17 <= 1'b0;
 (* ASYNC_REG = "TRUE" *) reg [1:0] permit_17 = 2'b00;
-always @(posedge AXI_17_ACLK or negedge AXI_17_ARESET_N or posedge trip_hold_17)
-    if (!AXI_17_ARESET_N || trip_hold_17) permit_17 <= 2'b00;
-    else permit_17 <= {permit_17[0], sw_ready[1]};
-wire enabled_17 = permit_17[1] & sw_ready[1];
+wire ready_reset_17 = NATIVE_READY_RESET && !sw_ready[1];
+always @(posedge AXI_17_ACLK or negedge AXI_17_ARESET_N or
+        posedge trip_hold_17 or posedge ready_reset_17)
+    if (!AXI_17_ARESET_N || trip_hold_17 || ready_reset_17) permit_17 <= 2'b00;
+    else permit_17 <= {permit_17[0], NATIVE_READY_RESET ? 1'b1 : sw_ready[1]};
+wire enabled_17 = NATIVE_READY_RESET ? permit_17[1] : permit_17[1] & sw_ready[1];
 wire primitive_AXI_17_ARREADY;
 assign AXI_17_ARREADY = primitive_AXI_17_ARREADY & enabled_17;
 wire primitive_AXI_17_AWREADY;
@@ -1506,10 +1545,12 @@ always @(posedge APB_1_PCLK or posedge DRAM_1_STAT_CATTRIP)
     if (DRAM_1_STAT_CATTRIP) trip_hold_18 <= 1'b1;
     else trip_hold_18 <= 1'b0;
 (* ASYNC_REG = "TRUE" *) reg [1:0] permit_18 = 2'b00;
-always @(posedge AXI_18_ACLK or negedge AXI_18_ARESET_N or posedge trip_hold_18)
-    if (!AXI_18_ARESET_N || trip_hold_18) permit_18 <= 2'b00;
-    else permit_18 <= {permit_18[0], sw_ready[1]};
-wire enabled_18 = permit_18[1] & sw_ready[1];
+wire ready_reset_18 = NATIVE_READY_RESET && !sw_ready[1];
+always @(posedge AXI_18_ACLK or negedge AXI_18_ARESET_N or
+        posedge trip_hold_18 or posedge ready_reset_18)
+    if (!AXI_18_ARESET_N || trip_hold_18 || ready_reset_18) permit_18 <= 2'b00;
+    else permit_18 <= {permit_18[0], NATIVE_READY_RESET ? 1'b1 : sw_ready[1]};
+wire enabled_18 = NATIVE_READY_RESET ? permit_18[1] : permit_18[1] & sw_ready[1];
 wire primitive_AXI_18_ARREADY;
 assign AXI_18_ARREADY = primitive_AXI_18_ARREADY & enabled_18;
 wire primitive_AXI_18_AWREADY;
@@ -1528,10 +1569,12 @@ always @(posedge APB_1_PCLK or posedge DRAM_1_STAT_CATTRIP)
     if (DRAM_1_STAT_CATTRIP) trip_hold_19 <= 1'b1;
     else trip_hold_19 <= 1'b0;
 (* ASYNC_REG = "TRUE" *) reg [1:0] permit_19 = 2'b00;
-always @(posedge AXI_19_ACLK or negedge AXI_19_ARESET_N or posedge trip_hold_19)
-    if (!AXI_19_ARESET_N || trip_hold_19) permit_19 <= 2'b00;
-    else permit_19 <= {permit_19[0], sw_ready[1]};
-wire enabled_19 = permit_19[1] & sw_ready[1];
+wire ready_reset_19 = NATIVE_READY_RESET && !sw_ready[1];
+always @(posedge AXI_19_ACLK or negedge AXI_19_ARESET_N or
+        posedge trip_hold_19 or posedge ready_reset_19)
+    if (!AXI_19_ARESET_N || trip_hold_19 || ready_reset_19) permit_19 <= 2'b00;
+    else permit_19 <= {permit_19[0], NATIVE_READY_RESET ? 1'b1 : sw_ready[1]};
+wire enabled_19 = NATIVE_READY_RESET ? permit_19[1] : permit_19[1] & sw_ready[1];
 wire primitive_AXI_19_ARREADY;
 assign AXI_19_ARREADY = primitive_AXI_19_ARREADY & enabled_19;
 wire primitive_AXI_19_AWREADY;
@@ -1550,10 +1593,12 @@ always @(posedge APB_1_PCLK or posedge DRAM_1_STAT_CATTRIP)
     if (DRAM_1_STAT_CATTRIP) trip_hold_20 <= 1'b1;
     else trip_hold_20 <= 1'b0;
 (* ASYNC_REG = "TRUE" *) reg [1:0] permit_20 = 2'b00;
-always @(posedge AXI_20_ACLK or negedge AXI_20_ARESET_N or posedge trip_hold_20)
-    if (!AXI_20_ARESET_N || trip_hold_20) permit_20 <= 2'b00;
-    else permit_20 <= {permit_20[0], sw_ready[1]};
-wire enabled_20 = permit_20[1] & sw_ready[1];
+wire ready_reset_20 = NATIVE_READY_RESET && !sw_ready[1];
+always @(posedge AXI_20_ACLK or negedge AXI_20_ARESET_N or
+        posedge trip_hold_20 or posedge ready_reset_20)
+    if (!AXI_20_ARESET_N || trip_hold_20 || ready_reset_20) permit_20 <= 2'b00;
+    else permit_20 <= {permit_20[0], NATIVE_READY_RESET ? 1'b1 : sw_ready[1]};
+wire enabled_20 = NATIVE_READY_RESET ? permit_20[1] : permit_20[1] & sw_ready[1];
 wire primitive_AXI_20_ARREADY;
 assign AXI_20_ARREADY = primitive_AXI_20_ARREADY & enabled_20;
 wire primitive_AXI_20_AWREADY;
@@ -1572,10 +1617,12 @@ always @(posedge APB_1_PCLK or posedge DRAM_1_STAT_CATTRIP)
     if (DRAM_1_STAT_CATTRIP) trip_hold_21 <= 1'b1;
     else trip_hold_21 <= 1'b0;
 (* ASYNC_REG = "TRUE" *) reg [1:0] permit_21 = 2'b00;
-always @(posedge AXI_21_ACLK or negedge AXI_21_ARESET_N or posedge trip_hold_21)
-    if (!AXI_21_ARESET_N || trip_hold_21) permit_21 <= 2'b00;
-    else permit_21 <= {permit_21[0], sw_ready[1]};
-wire enabled_21 = permit_21[1] & sw_ready[1];
+wire ready_reset_21 = NATIVE_READY_RESET && !sw_ready[1];
+always @(posedge AXI_21_ACLK or negedge AXI_21_ARESET_N or
+        posedge trip_hold_21 or posedge ready_reset_21)
+    if (!AXI_21_ARESET_N || trip_hold_21 || ready_reset_21) permit_21 <= 2'b00;
+    else permit_21 <= {permit_21[0], NATIVE_READY_RESET ? 1'b1 : sw_ready[1]};
+wire enabled_21 = NATIVE_READY_RESET ? permit_21[1] : permit_21[1] & sw_ready[1];
 wire primitive_AXI_21_ARREADY;
 assign AXI_21_ARREADY = primitive_AXI_21_ARREADY & enabled_21;
 wire primitive_AXI_21_AWREADY;
@@ -1594,10 +1641,12 @@ always @(posedge APB_1_PCLK or posedge DRAM_1_STAT_CATTRIP)
     if (DRAM_1_STAT_CATTRIP) trip_hold_22 <= 1'b1;
     else trip_hold_22 <= 1'b0;
 (* ASYNC_REG = "TRUE" *) reg [1:0] permit_22 = 2'b00;
-always @(posedge AXI_22_ACLK or negedge AXI_22_ARESET_N or posedge trip_hold_22)
-    if (!AXI_22_ARESET_N || trip_hold_22) permit_22 <= 2'b00;
-    else permit_22 <= {permit_22[0], sw_ready[1]};
-wire enabled_22 = permit_22[1] & sw_ready[1];
+wire ready_reset_22 = NATIVE_READY_RESET && !sw_ready[1];
+always @(posedge AXI_22_ACLK or negedge AXI_22_ARESET_N or
+        posedge trip_hold_22 or posedge ready_reset_22)
+    if (!AXI_22_ARESET_N || trip_hold_22 || ready_reset_22) permit_22 <= 2'b00;
+    else permit_22 <= {permit_22[0], NATIVE_READY_RESET ? 1'b1 : sw_ready[1]};
+wire enabled_22 = NATIVE_READY_RESET ? permit_22[1] : permit_22[1] & sw_ready[1];
 wire primitive_AXI_22_ARREADY;
 assign AXI_22_ARREADY = primitive_AXI_22_ARREADY & enabled_22;
 wire primitive_AXI_22_AWREADY;
@@ -1616,10 +1665,12 @@ always @(posedge APB_1_PCLK or posedge DRAM_1_STAT_CATTRIP)
     if (DRAM_1_STAT_CATTRIP) trip_hold_23 <= 1'b1;
     else trip_hold_23 <= 1'b0;
 (* ASYNC_REG = "TRUE" *) reg [1:0] permit_23 = 2'b00;
-always @(posedge AXI_23_ACLK or negedge AXI_23_ARESET_N or posedge trip_hold_23)
-    if (!AXI_23_ARESET_N || trip_hold_23) permit_23 <= 2'b00;
-    else permit_23 <= {permit_23[0], sw_ready[1]};
-wire enabled_23 = permit_23[1] & sw_ready[1];
+wire ready_reset_23 = NATIVE_READY_RESET && !sw_ready[1];
+always @(posedge AXI_23_ACLK or negedge AXI_23_ARESET_N or
+        posedge trip_hold_23 or posedge ready_reset_23)
+    if (!AXI_23_ARESET_N || trip_hold_23 || ready_reset_23) permit_23 <= 2'b00;
+    else permit_23 <= {permit_23[0], NATIVE_READY_RESET ? 1'b1 : sw_ready[1]};
+wire enabled_23 = NATIVE_READY_RESET ? permit_23[1] : permit_23[1] & sw_ready[1];
 wire primitive_AXI_23_ARREADY;
 assign AXI_23_ARREADY = primitive_AXI_23_ARREADY & enabled_23;
 wire primitive_AXI_23_AWREADY;
@@ -1638,10 +1689,12 @@ always @(posedge APB_1_PCLK or posedge DRAM_1_STAT_CATTRIP)
     if (DRAM_1_STAT_CATTRIP) trip_hold_24 <= 1'b1;
     else trip_hold_24 <= 1'b0;
 (* ASYNC_REG = "TRUE" *) reg [1:0] permit_24 = 2'b00;
-always @(posedge AXI_24_ACLK or negedge AXI_24_ARESET_N or posedge trip_hold_24)
-    if (!AXI_24_ARESET_N || trip_hold_24) permit_24 <= 2'b00;
-    else permit_24 <= {permit_24[0], sw_ready[1]};
-wire enabled_24 = permit_24[1] & sw_ready[1];
+wire ready_reset_24 = NATIVE_READY_RESET && !sw_ready[1];
+always @(posedge AXI_24_ACLK or negedge AXI_24_ARESET_N or
+        posedge trip_hold_24 or posedge ready_reset_24)
+    if (!AXI_24_ARESET_N || trip_hold_24 || ready_reset_24) permit_24 <= 2'b00;
+    else permit_24 <= {permit_24[0], NATIVE_READY_RESET ? 1'b1 : sw_ready[1]};
+wire enabled_24 = NATIVE_READY_RESET ? permit_24[1] : permit_24[1] & sw_ready[1];
 wire primitive_AXI_24_ARREADY;
 assign AXI_24_ARREADY = primitive_AXI_24_ARREADY & enabled_24;
 wire primitive_AXI_24_AWREADY;
@@ -1660,10 +1713,12 @@ always @(posedge APB_1_PCLK or posedge DRAM_1_STAT_CATTRIP)
     if (DRAM_1_STAT_CATTRIP) trip_hold_25 <= 1'b1;
     else trip_hold_25 <= 1'b0;
 (* ASYNC_REG = "TRUE" *) reg [1:0] permit_25 = 2'b00;
-always @(posedge AXI_25_ACLK or negedge AXI_25_ARESET_N or posedge trip_hold_25)
-    if (!AXI_25_ARESET_N || trip_hold_25) permit_25 <= 2'b00;
-    else permit_25 <= {permit_25[0], sw_ready[1]};
-wire enabled_25 = permit_25[1] & sw_ready[1];
+wire ready_reset_25 = NATIVE_READY_RESET && !sw_ready[1];
+always @(posedge AXI_25_ACLK or negedge AXI_25_ARESET_N or
+        posedge trip_hold_25 or posedge ready_reset_25)
+    if (!AXI_25_ARESET_N || trip_hold_25 || ready_reset_25) permit_25 <= 2'b00;
+    else permit_25 <= {permit_25[0], NATIVE_READY_RESET ? 1'b1 : sw_ready[1]};
+wire enabled_25 = NATIVE_READY_RESET ? permit_25[1] : permit_25[1] & sw_ready[1];
 wire primitive_AXI_25_ARREADY;
 assign AXI_25_ARREADY = primitive_AXI_25_ARREADY & enabled_25;
 wire primitive_AXI_25_AWREADY;
@@ -1682,10 +1737,12 @@ always @(posedge APB_1_PCLK or posedge DRAM_1_STAT_CATTRIP)
     if (DRAM_1_STAT_CATTRIP) trip_hold_26 <= 1'b1;
     else trip_hold_26 <= 1'b0;
 (* ASYNC_REG = "TRUE" *) reg [1:0] permit_26 = 2'b00;
-always @(posedge AXI_26_ACLK or negedge AXI_26_ARESET_N or posedge trip_hold_26)
-    if (!AXI_26_ARESET_N || trip_hold_26) permit_26 <= 2'b00;
-    else permit_26 <= {permit_26[0], sw_ready[1]};
-wire enabled_26 = permit_26[1] & sw_ready[1];
+wire ready_reset_26 = NATIVE_READY_RESET && !sw_ready[1];
+always @(posedge AXI_26_ACLK or negedge AXI_26_ARESET_N or
+        posedge trip_hold_26 or posedge ready_reset_26)
+    if (!AXI_26_ARESET_N || trip_hold_26 || ready_reset_26) permit_26 <= 2'b00;
+    else permit_26 <= {permit_26[0], NATIVE_READY_RESET ? 1'b1 : sw_ready[1]};
+wire enabled_26 = NATIVE_READY_RESET ? permit_26[1] : permit_26[1] & sw_ready[1];
 wire primitive_AXI_26_ARREADY;
 assign AXI_26_ARREADY = primitive_AXI_26_ARREADY & enabled_26;
 wire primitive_AXI_26_AWREADY;
@@ -1704,10 +1761,12 @@ always @(posedge APB_1_PCLK or posedge DRAM_1_STAT_CATTRIP)
     if (DRAM_1_STAT_CATTRIP) trip_hold_27 <= 1'b1;
     else trip_hold_27 <= 1'b0;
 (* ASYNC_REG = "TRUE" *) reg [1:0] permit_27 = 2'b00;
-always @(posedge AXI_27_ACLK or negedge AXI_27_ARESET_N or posedge trip_hold_27)
-    if (!AXI_27_ARESET_N || trip_hold_27) permit_27 <= 2'b00;
-    else permit_27 <= {permit_27[0], sw_ready[1]};
-wire enabled_27 = permit_27[1] & sw_ready[1];
+wire ready_reset_27 = NATIVE_READY_RESET && !sw_ready[1];
+always @(posedge AXI_27_ACLK or negedge AXI_27_ARESET_N or
+        posedge trip_hold_27 or posedge ready_reset_27)
+    if (!AXI_27_ARESET_N || trip_hold_27 || ready_reset_27) permit_27 <= 2'b00;
+    else permit_27 <= {permit_27[0], NATIVE_READY_RESET ? 1'b1 : sw_ready[1]};
+wire enabled_27 = NATIVE_READY_RESET ? permit_27[1] : permit_27[1] & sw_ready[1];
 wire primitive_AXI_27_ARREADY;
 assign AXI_27_ARREADY = primitive_AXI_27_ARREADY & enabled_27;
 wire primitive_AXI_27_AWREADY;
@@ -1726,10 +1785,12 @@ always @(posedge APB_1_PCLK or posedge DRAM_1_STAT_CATTRIP)
     if (DRAM_1_STAT_CATTRIP) trip_hold_28 <= 1'b1;
     else trip_hold_28 <= 1'b0;
 (* ASYNC_REG = "TRUE" *) reg [1:0] permit_28 = 2'b00;
-always @(posedge AXI_28_ACLK or negedge AXI_28_ARESET_N or posedge trip_hold_28)
-    if (!AXI_28_ARESET_N || trip_hold_28) permit_28 <= 2'b00;
-    else permit_28 <= {permit_28[0], sw_ready[1]};
-wire enabled_28 = permit_28[1] & sw_ready[1];
+wire ready_reset_28 = NATIVE_READY_RESET && !sw_ready[1];
+always @(posedge AXI_28_ACLK or negedge AXI_28_ARESET_N or
+        posedge trip_hold_28 or posedge ready_reset_28)
+    if (!AXI_28_ARESET_N || trip_hold_28 || ready_reset_28) permit_28 <= 2'b00;
+    else permit_28 <= {permit_28[0], NATIVE_READY_RESET ? 1'b1 : sw_ready[1]};
+wire enabled_28 = NATIVE_READY_RESET ? permit_28[1] : permit_28[1] & sw_ready[1];
 wire primitive_AXI_28_ARREADY;
 assign AXI_28_ARREADY = primitive_AXI_28_ARREADY & enabled_28;
 wire primitive_AXI_28_AWREADY;
@@ -1748,10 +1809,12 @@ always @(posedge APB_1_PCLK or posedge DRAM_1_STAT_CATTRIP)
     if (DRAM_1_STAT_CATTRIP) trip_hold_29 <= 1'b1;
     else trip_hold_29 <= 1'b0;
 (* ASYNC_REG = "TRUE" *) reg [1:0] permit_29 = 2'b00;
-always @(posedge AXI_29_ACLK or negedge AXI_29_ARESET_N or posedge trip_hold_29)
-    if (!AXI_29_ARESET_N || trip_hold_29) permit_29 <= 2'b00;
-    else permit_29 <= {permit_29[0], sw_ready[1]};
-wire enabled_29 = permit_29[1] & sw_ready[1];
+wire ready_reset_29 = NATIVE_READY_RESET && !sw_ready[1];
+always @(posedge AXI_29_ACLK or negedge AXI_29_ARESET_N or
+        posedge trip_hold_29 or posedge ready_reset_29)
+    if (!AXI_29_ARESET_N || trip_hold_29 || ready_reset_29) permit_29 <= 2'b00;
+    else permit_29 <= {permit_29[0], NATIVE_READY_RESET ? 1'b1 : sw_ready[1]};
+wire enabled_29 = NATIVE_READY_RESET ? permit_29[1] : permit_29[1] & sw_ready[1];
 wire primitive_AXI_29_ARREADY;
 assign AXI_29_ARREADY = primitive_AXI_29_ARREADY & enabled_29;
 wire primitive_AXI_29_AWREADY;
@@ -1770,10 +1833,12 @@ always @(posedge APB_1_PCLK or posedge DRAM_1_STAT_CATTRIP)
     if (DRAM_1_STAT_CATTRIP) trip_hold_30 <= 1'b1;
     else trip_hold_30 <= 1'b0;
 (* ASYNC_REG = "TRUE" *) reg [1:0] permit_30 = 2'b00;
-always @(posedge AXI_30_ACLK or negedge AXI_30_ARESET_N or posedge trip_hold_30)
-    if (!AXI_30_ARESET_N || trip_hold_30) permit_30 <= 2'b00;
-    else permit_30 <= {permit_30[0], sw_ready[1]};
-wire enabled_30 = permit_30[1] & sw_ready[1];
+wire ready_reset_30 = NATIVE_READY_RESET && !sw_ready[1];
+always @(posedge AXI_30_ACLK or negedge AXI_30_ARESET_N or
+        posedge trip_hold_30 or posedge ready_reset_30)
+    if (!AXI_30_ARESET_N || trip_hold_30 || ready_reset_30) permit_30 <= 2'b00;
+    else permit_30 <= {permit_30[0], NATIVE_READY_RESET ? 1'b1 : sw_ready[1]};
+wire enabled_30 = NATIVE_READY_RESET ? permit_30[1] : permit_30[1] & sw_ready[1];
 wire primitive_AXI_30_ARREADY;
 assign AXI_30_ARREADY = primitive_AXI_30_ARREADY & enabled_30;
 wire primitive_AXI_30_AWREADY;
@@ -1792,10 +1857,12 @@ always @(posedge APB_1_PCLK or posedge DRAM_1_STAT_CATTRIP)
     if (DRAM_1_STAT_CATTRIP) trip_hold_31 <= 1'b1;
     else trip_hold_31 <= 1'b0;
 (* ASYNC_REG = "TRUE" *) reg [1:0] permit_31 = 2'b00;
-always @(posedge AXI_31_ACLK or negedge AXI_31_ARESET_N or posedge trip_hold_31)
-    if (!AXI_31_ARESET_N || trip_hold_31) permit_31 <= 2'b00;
-    else permit_31 <= {permit_31[0], sw_ready[1]};
-wire enabled_31 = permit_31[1] & sw_ready[1];
+wire ready_reset_31 = NATIVE_READY_RESET && !sw_ready[1];
+always @(posedge AXI_31_ACLK or negedge AXI_31_ARESET_N or
+        posedge trip_hold_31 or posedge ready_reset_31)
+    if (!AXI_31_ARESET_N || trip_hold_31 || ready_reset_31) permit_31 <= 2'b00;
+    else permit_31 <= {permit_31[0], NATIVE_READY_RESET ? 1'b1 : sw_ready[1]};
+wire enabled_31 = NATIVE_READY_RESET ? permit_31[1] : permit_31[1] & sw_ready[1];
 wire primitive_AXI_31_ARREADY;
 assign AXI_31_ARREADY = primitive_AXI_31_ARREADY & enabled_31;
 wire primitive_AXI_31_AWREADY;
@@ -2816,7 +2883,7 @@ HBM_TWO_STACK_INTF #(
     .AXI_00_ACLK(AXI_00_ACLK),
     .AXI_00_ARADDR({AXI_00_ARADDR[32:28], 4'b0000, AXI_00_ARADDR[27:0]}),
     .AXI_00_ARBURST(AXI_00_ARBURST),
-    .AXI_00_ARESET_N(AXI_00_ARESET_N & enabled_00),
+    .AXI_00_ARESET_N(NATIVE_READY_RESET ? enabled_00 : AXI_00_ARESET_N & enabled_00),
     .AXI_00_ARID(AXI_00_ARID),
     .AXI_00_ARLEN(AXI_00_ARLEN),
     .AXI_00_ARSIZE(AXI_00_ARSIZE),
@@ -2838,7 +2905,7 @@ HBM_TWO_STACK_INTF #(
     .AXI_01_ACLK(AXI_01_ACLK),
     .AXI_01_ARADDR({AXI_01_ARADDR[32:28], 4'b0000, AXI_01_ARADDR[27:0]}),
     .AXI_01_ARBURST(AXI_01_ARBURST),
-    .AXI_01_ARESET_N(AXI_01_ARESET_N & enabled_01),
+    .AXI_01_ARESET_N(NATIVE_READY_RESET ? enabled_01 : AXI_01_ARESET_N & enabled_01),
     .AXI_01_ARID(AXI_01_ARID),
     .AXI_01_ARLEN(AXI_01_ARLEN),
     .AXI_01_ARSIZE(AXI_01_ARSIZE),
@@ -2860,7 +2927,7 @@ HBM_TWO_STACK_INTF #(
     .AXI_02_ACLK(AXI_02_ACLK),
     .AXI_02_ARADDR({AXI_02_ARADDR[32:28], 4'b0000, AXI_02_ARADDR[27:0]}),
     .AXI_02_ARBURST(AXI_02_ARBURST),
-    .AXI_02_ARESET_N(AXI_02_ARESET_N & enabled_02),
+    .AXI_02_ARESET_N(NATIVE_READY_RESET ? enabled_02 : AXI_02_ARESET_N & enabled_02),
     .AXI_02_ARID(AXI_02_ARID),
     .AXI_02_ARLEN(AXI_02_ARLEN),
     .AXI_02_ARSIZE(AXI_02_ARSIZE),
@@ -2882,7 +2949,7 @@ HBM_TWO_STACK_INTF #(
     .AXI_03_ACLK(AXI_03_ACLK),
     .AXI_03_ARADDR({AXI_03_ARADDR[32:28], 4'b0000, AXI_03_ARADDR[27:0]}),
     .AXI_03_ARBURST(AXI_03_ARBURST),
-    .AXI_03_ARESET_N(AXI_03_ARESET_N & enabled_03),
+    .AXI_03_ARESET_N(NATIVE_READY_RESET ? enabled_03 : AXI_03_ARESET_N & enabled_03),
     .AXI_03_ARID(AXI_03_ARID),
     .AXI_03_ARLEN(AXI_03_ARLEN),
     .AXI_03_ARSIZE(AXI_03_ARSIZE),
@@ -2904,7 +2971,7 @@ HBM_TWO_STACK_INTF #(
     .AXI_04_ACLK(AXI_04_ACLK),
     .AXI_04_ARADDR({AXI_04_ARADDR[32:28], 4'b0000, AXI_04_ARADDR[27:0]}),
     .AXI_04_ARBURST(AXI_04_ARBURST),
-    .AXI_04_ARESET_N(AXI_04_ARESET_N & enabled_04),
+    .AXI_04_ARESET_N(NATIVE_READY_RESET ? enabled_04 : AXI_04_ARESET_N & enabled_04),
     .AXI_04_ARID(AXI_04_ARID),
     .AXI_04_ARLEN(AXI_04_ARLEN),
     .AXI_04_ARSIZE(AXI_04_ARSIZE),
@@ -2926,7 +2993,7 @@ HBM_TWO_STACK_INTF #(
     .AXI_05_ACLK(AXI_05_ACLK),
     .AXI_05_ARADDR({AXI_05_ARADDR[32:28], 4'b0000, AXI_05_ARADDR[27:0]}),
     .AXI_05_ARBURST(AXI_05_ARBURST),
-    .AXI_05_ARESET_N(AXI_05_ARESET_N & enabled_05),
+    .AXI_05_ARESET_N(NATIVE_READY_RESET ? enabled_05 : AXI_05_ARESET_N & enabled_05),
     .AXI_05_ARID(AXI_05_ARID),
     .AXI_05_ARLEN(AXI_05_ARLEN),
     .AXI_05_ARSIZE(AXI_05_ARSIZE),
@@ -2948,7 +3015,7 @@ HBM_TWO_STACK_INTF #(
     .AXI_06_ACLK(AXI_06_ACLK),
     .AXI_06_ARADDR({AXI_06_ARADDR[32:28], 4'b0000, AXI_06_ARADDR[27:0]}),
     .AXI_06_ARBURST(AXI_06_ARBURST),
-    .AXI_06_ARESET_N(AXI_06_ARESET_N & enabled_06),
+    .AXI_06_ARESET_N(NATIVE_READY_RESET ? enabled_06 : AXI_06_ARESET_N & enabled_06),
     .AXI_06_ARID(AXI_06_ARID),
     .AXI_06_ARLEN(AXI_06_ARLEN),
     .AXI_06_ARSIZE(AXI_06_ARSIZE),
@@ -2970,7 +3037,7 @@ HBM_TWO_STACK_INTF #(
     .AXI_07_ACLK(AXI_07_ACLK),
     .AXI_07_ARADDR({AXI_07_ARADDR[32:28], 4'b0000, AXI_07_ARADDR[27:0]}),
     .AXI_07_ARBURST(AXI_07_ARBURST),
-    .AXI_07_ARESET_N(AXI_07_ARESET_N & enabled_07),
+    .AXI_07_ARESET_N(NATIVE_READY_RESET ? enabled_07 : AXI_07_ARESET_N & enabled_07),
     .AXI_07_ARID(AXI_07_ARID),
     .AXI_07_ARLEN(AXI_07_ARLEN),
     .AXI_07_ARSIZE(AXI_07_ARSIZE),
@@ -2992,7 +3059,7 @@ HBM_TWO_STACK_INTF #(
     .AXI_08_ACLK(AXI_08_ACLK),
     .AXI_08_ARADDR({AXI_08_ARADDR[32:28], 4'b0000, AXI_08_ARADDR[27:0]}),
     .AXI_08_ARBURST(AXI_08_ARBURST),
-    .AXI_08_ARESET_N(AXI_08_ARESET_N & enabled_08),
+    .AXI_08_ARESET_N(NATIVE_READY_RESET ? enabled_08 : AXI_08_ARESET_N & enabled_08),
     .AXI_08_ARID(AXI_08_ARID),
     .AXI_08_ARLEN(AXI_08_ARLEN),
     .AXI_08_ARSIZE(AXI_08_ARSIZE),
@@ -3014,7 +3081,7 @@ HBM_TWO_STACK_INTF #(
     .AXI_09_ACLK(AXI_09_ACLK),
     .AXI_09_ARADDR({AXI_09_ARADDR[32:28], 4'b0000, AXI_09_ARADDR[27:0]}),
     .AXI_09_ARBURST(AXI_09_ARBURST),
-    .AXI_09_ARESET_N(AXI_09_ARESET_N & enabled_09),
+    .AXI_09_ARESET_N(NATIVE_READY_RESET ? enabled_09 : AXI_09_ARESET_N & enabled_09),
     .AXI_09_ARID(AXI_09_ARID),
     .AXI_09_ARLEN(AXI_09_ARLEN),
     .AXI_09_ARSIZE(AXI_09_ARSIZE),
@@ -3036,7 +3103,7 @@ HBM_TWO_STACK_INTF #(
     .AXI_10_ACLK(AXI_10_ACLK),
     .AXI_10_ARADDR({AXI_10_ARADDR[32:28], 4'b0000, AXI_10_ARADDR[27:0]}),
     .AXI_10_ARBURST(AXI_10_ARBURST),
-    .AXI_10_ARESET_N(AXI_10_ARESET_N & enabled_10),
+    .AXI_10_ARESET_N(NATIVE_READY_RESET ? enabled_10 : AXI_10_ARESET_N & enabled_10),
     .AXI_10_ARID(AXI_10_ARID),
     .AXI_10_ARLEN(AXI_10_ARLEN),
     .AXI_10_ARSIZE(AXI_10_ARSIZE),
@@ -3058,7 +3125,7 @@ HBM_TWO_STACK_INTF #(
     .AXI_11_ACLK(AXI_11_ACLK),
     .AXI_11_ARADDR({AXI_11_ARADDR[32:28], 4'b0000, AXI_11_ARADDR[27:0]}),
     .AXI_11_ARBURST(AXI_11_ARBURST),
-    .AXI_11_ARESET_N(AXI_11_ARESET_N & enabled_11),
+    .AXI_11_ARESET_N(NATIVE_READY_RESET ? enabled_11 : AXI_11_ARESET_N & enabled_11),
     .AXI_11_ARID(AXI_11_ARID),
     .AXI_11_ARLEN(AXI_11_ARLEN),
     .AXI_11_ARSIZE(AXI_11_ARSIZE),
@@ -3080,7 +3147,7 @@ HBM_TWO_STACK_INTF #(
     .AXI_12_ACLK(AXI_12_ACLK),
     .AXI_12_ARADDR({AXI_12_ARADDR[32:28], 4'b0000, AXI_12_ARADDR[27:0]}),
     .AXI_12_ARBURST(AXI_12_ARBURST),
-    .AXI_12_ARESET_N(AXI_12_ARESET_N & enabled_12),
+    .AXI_12_ARESET_N(NATIVE_READY_RESET ? enabled_12 : AXI_12_ARESET_N & enabled_12),
     .AXI_12_ARID(AXI_12_ARID),
     .AXI_12_ARLEN(AXI_12_ARLEN),
     .AXI_12_ARSIZE(AXI_12_ARSIZE),
@@ -3102,7 +3169,7 @@ HBM_TWO_STACK_INTF #(
     .AXI_13_ACLK(AXI_13_ACLK),
     .AXI_13_ARADDR({AXI_13_ARADDR[32:28], 4'b0000, AXI_13_ARADDR[27:0]}),
     .AXI_13_ARBURST(AXI_13_ARBURST),
-    .AXI_13_ARESET_N(AXI_13_ARESET_N & enabled_13),
+    .AXI_13_ARESET_N(NATIVE_READY_RESET ? enabled_13 : AXI_13_ARESET_N & enabled_13),
     .AXI_13_ARID(AXI_13_ARID),
     .AXI_13_ARLEN(AXI_13_ARLEN),
     .AXI_13_ARSIZE(AXI_13_ARSIZE),
@@ -3124,7 +3191,7 @@ HBM_TWO_STACK_INTF #(
     .AXI_14_ACLK(AXI_14_ACLK),
     .AXI_14_ARADDR({AXI_14_ARADDR[32:28], 4'b0000, AXI_14_ARADDR[27:0]}),
     .AXI_14_ARBURST(AXI_14_ARBURST),
-    .AXI_14_ARESET_N(AXI_14_ARESET_N & enabled_14),
+    .AXI_14_ARESET_N(NATIVE_READY_RESET ? enabled_14 : AXI_14_ARESET_N & enabled_14),
     .AXI_14_ARID(AXI_14_ARID),
     .AXI_14_ARLEN(AXI_14_ARLEN),
     .AXI_14_ARSIZE(AXI_14_ARSIZE),
@@ -3146,7 +3213,7 @@ HBM_TWO_STACK_INTF #(
     .AXI_15_ACLK(AXI_15_ACLK),
     .AXI_15_ARADDR({AXI_15_ARADDR[32:28], 4'b0000, AXI_15_ARADDR[27:0]}),
     .AXI_15_ARBURST(AXI_15_ARBURST),
-    .AXI_15_ARESET_N(AXI_15_ARESET_N & enabled_15),
+    .AXI_15_ARESET_N(NATIVE_READY_RESET ? enabled_15 : AXI_15_ARESET_N & enabled_15),
     .AXI_15_ARID(AXI_15_ARID),
     .AXI_15_ARLEN(AXI_15_ARLEN),
     .AXI_15_ARSIZE(AXI_15_ARSIZE),
@@ -3168,7 +3235,7 @@ HBM_TWO_STACK_INTF #(
     .AXI_16_ACLK(AXI_16_ACLK),
     .AXI_16_ARADDR({AXI_16_ARADDR[32:28], 4'b0000, AXI_16_ARADDR[27:0]}),
     .AXI_16_ARBURST(AXI_16_ARBURST),
-    .AXI_16_ARESET_N(AXI_16_ARESET_N & enabled_16),
+    .AXI_16_ARESET_N(NATIVE_READY_RESET ? enabled_16 : AXI_16_ARESET_N & enabled_16),
     .AXI_16_ARID(AXI_16_ARID),
     .AXI_16_ARLEN(AXI_16_ARLEN),
     .AXI_16_ARSIZE(AXI_16_ARSIZE),
@@ -3190,7 +3257,7 @@ HBM_TWO_STACK_INTF #(
     .AXI_17_ACLK(AXI_17_ACLK),
     .AXI_17_ARADDR({AXI_17_ARADDR[32:28], 4'b0000, AXI_17_ARADDR[27:0]}),
     .AXI_17_ARBURST(AXI_17_ARBURST),
-    .AXI_17_ARESET_N(AXI_17_ARESET_N & enabled_17),
+    .AXI_17_ARESET_N(NATIVE_READY_RESET ? enabled_17 : AXI_17_ARESET_N & enabled_17),
     .AXI_17_ARID(AXI_17_ARID),
     .AXI_17_ARLEN(AXI_17_ARLEN),
     .AXI_17_ARSIZE(AXI_17_ARSIZE),
@@ -3212,7 +3279,7 @@ HBM_TWO_STACK_INTF #(
     .AXI_18_ACLK(AXI_18_ACLK),
     .AXI_18_ARADDR({AXI_18_ARADDR[32:28], 4'b0000, AXI_18_ARADDR[27:0]}),
     .AXI_18_ARBURST(AXI_18_ARBURST),
-    .AXI_18_ARESET_N(AXI_18_ARESET_N & enabled_18),
+    .AXI_18_ARESET_N(NATIVE_READY_RESET ? enabled_18 : AXI_18_ARESET_N & enabled_18),
     .AXI_18_ARID(AXI_18_ARID),
     .AXI_18_ARLEN(AXI_18_ARLEN),
     .AXI_18_ARSIZE(AXI_18_ARSIZE),
@@ -3234,7 +3301,7 @@ HBM_TWO_STACK_INTF #(
     .AXI_19_ACLK(AXI_19_ACLK),
     .AXI_19_ARADDR({AXI_19_ARADDR[32:28], 4'b0000, AXI_19_ARADDR[27:0]}),
     .AXI_19_ARBURST(AXI_19_ARBURST),
-    .AXI_19_ARESET_N(AXI_19_ARESET_N & enabled_19),
+    .AXI_19_ARESET_N(NATIVE_READY_RESET ? enabled_19 : AXI_19_ARESET_N & enabled_19),
     .AXI_19_ARID(AXI_19_ARID),
     .AXI_19_ARLEN(AXI_19_ARLEN),
     .AXI_19_ARSIZE(AXI_19_ARSIZE),
@@ -3256,7 +3323,7 @@ HBM_TWO_STACK_INTF #(
     .AXI_20_ACLK(AXI_20_ACLK),
     .AXI_20_ARADDR({AXI_20_ARADDR[32:28], 4'b0000, AXI_20_ARADDR[27:0]}),
     .AXI_20_ARBURST(AXI_20_ARBURST),
-    .AXI_20_ARESET_N(AXI_20_ARESET_N & enabled_20),
+    .AXI_20_ARESET_N(NATIVE_READY_RESET ? enabled_20 : AXI_20_ARESET_N & enabled_20),
     .AXI_20_ARID(AXI_20_ARID),
     .AXI_20_ARLEN(AXI_20_ARLEN),
     .AXI_20_ARSIZE(AXI_20_ARSIZE),
@@ -3278,7 +3345,7 @@ HBM_TWO_STACK_INTF #(
     .AXI_21_ACLK(AXI_21_ACLK),
     .AXI_21_ARADDR({AXI_21_ARADDR[32:28], 4'b0000, AXI_21_ARADDR[27:0]}),
     .AXI_21_ARBURST(AXI_21_ARBURST),
-    .AXI_21_ARESET_N(AXI_21_ARESET_N & enabled_21),
+    .AXI_21_ARESET_N(NATIVE_READY_RESET ? enabled_21 : AXI_21_ARESET_N & enabled_21),
     .AXI_21_ARID(AXI_21_ARID),
     .AXI_21_ARLEN(AXI_21_ARLEN),
     .AXI_21_ARSIZE(AXI_21_ARSIZE),
@@ -3300,7 +3367,7 @@ HBM_TWO_STACK_INTF #(
     .AXI_22_ACLK(AXI_22_ACLK),
     .AXI_22_ARADDR({AXI_22_ARADDR[32:28], 4'b0000, AXI_22_ARADDR[27:0]}),
     .AXI_22_ARBURST(AXI_22_ARBURST),
-    .AXI_22_ARESET_N(AXI_22_ARESET_N & enabled_22),
+    .AXI_22_ARESET_N(NATIVE_READY_RESET ? enabled_22 : AXI_22_ARESET_N & enabled_22),
     .AXI_22_ARID(AXI_22_ARID),
     .AXI_22_ARLEN(AXI_22_ARLEN),
     .AXI_22_ARSIZE(AXI_22_ARSIZE),
@@ -3322,7 +3389,7 @@ HBM_TWO_STACK_INTF #(
     .AXI_23_ACLK(AXI_23_ACLK),
     .AXI_23_ARADDR({AXI_23_ARADDR[32:28], 4'b0000, AXI_23_ARADDR[27:0]}),
     .AXI_23_ARBURST(AXI_23_ARBURST),
-    .AXI_23_ARESET_N(AXI_23_ARESET_N & enabled_23),
+    .AXI_23_ARESET_N(NATIVE_READY_RESET ? enabled_23 : AXI_23_ARESET_N & enabled_23),
     .AXI_23_ARID(AXI_23_ARID),
     .AXI_23_ARLEN(AXI_23_ARLEN),
     .AXI_23_ARSIZE(AXI_23_ARSIZE),
@@ -3344,7 +3411,7 @@ HBM_TWO_STACK_INTF #(
     .AXI_24_ACLK(AXI_24_ACLK),
     .AXI_24_ARADDR({AXI_24_ARADDR[32:28], 4'b0000, AXI_24_ARADDR[27:0]}),
     .AXI_24_ARBURST(AXI_24_ARBURST),
-    .AXI_24_ARESET_N(AXI_24_ARESET_N & enabled_24),
+    .AXI_24_ARESET_N(NATIVE_READY_RESET ? enabled_24 : AXI_24_ARESET_N & enabled_24),
     .AXI_24_ARID(AXI_24_ARID),
     .AXI_24_ARLEN(AXI_24_ARLEN),
     .AXI_24_ARSIZE(AXI_24_ARSIZE),
@@ -3366,7 +3433,7 @@ HBM_TWO_STACK_INTF #(
     .AXI_25_ACLK(AXI_25_ACLK),
     .AXI_25_ARADDR({AXI_25_ARADDR[32:28], 4'b0000, AXI_25_ARADDR[27:0]}),
     .AXI_25_ARBURST(AXI_25_ARBURST),
-    .AXI_25_ARESET_N(AXI_25_ARESET_N & enabled_25),
+    .AXI_25_ARESET_N(NATIVE_READY_RESET ? enabled_25 : AXI_25_ARESET_N & enabled_25),
     .AXI_25_ARID(AXI_25_ARID),
     .AXI_25_ARLEN(AXI_25_ARLEN),
     .AXI_25_ARSIZE(AXI_25_ARSIZE),
@@ -3388,7 +3455,7 @@ HBM_TWO_STACK_INTF #(
     .AXI_26_ACLK(AXI_26_ACLK),
     .AXI_26_ARADDR({AXI_26_ARADDR[32:28], 4'b0000, AXI_26_ARADDR[27:0]}),
     .AXI_26_ARBURST(AXI_26_ARBURST),
-    .AXI_26_ARESET_N(AXI_26_ARESET_N & enabled_26),
+    .AXI_26_ARESET_N(NATIVE_READY_RESET ? enabled_26 : AXI_26_ARESET_N & enabled_26),
     .AXI_26_ARID(AXI_26_ARID),
     .AXI_26_ARLEN(AXI_26_ARLEN),
     .AXI_26_ARSIZE(AXI_26_ARSIZE),
@@ -3410,7 +3477,7 @@ HBM_TWO_STACK_INTF #(
     .AXI_27_ACLK(AXI_27_ACLK),
     .AXI_27_ARADDR({AXI_27_ARADDR[32:28], 4'b0000, AXI_27_ARADDR[27:0]}),
     .AXI_27_ARBURST(AXI_27_ARBURST),
-    .AXI_27_ARESET_N(AXI_27_ARESET_N & enabled_27),
+    .AXI_27_ARESET_N(NATIVE_READY_RESET ? enabled_27 : AXI_27_ARESET_N & enabled_27),
     .AXI_27_ARID(AXI_27_ARID),
     .AXI_27_ARLEN(AXI_27_ARLEN),
     .AXI_27_ARSIZE(AXI_27_ARSIZE),
@@ -3432,7 +3499,7 @@ HBM_TWO_STACK_INTF #(
     .AXI_28_ACLK(AXI_28_ACLK),
     .AXI_28_ARADDR({AXI_28_ARADDR[32:28], 4'b0000, AXI_28_ARADDR[27:0]}),
     .AXI_28_ARBURST(AXI_28_ARBURST),
-    .AXI_28_ARESET_N(AXI_28_ARESET_N & enabled_28),
+    .AXI_28_ARESET_N(NATIVE_READY_RESET ? enabled_28 : AXI_28_ARESET_N & enabled_28),
     .AXI_28_ARID(AXI_28_ARID),
     .AXI_28_ARLEN(AXI_28_ARLEN),
     .AXI_28_ARSIZE(AXI_28_ARSIZE),
@@ -3454,7 +3521,7 @@ HBM_TWO_STACK_INTF #(
     .AXI_29_ACLK(AXI_29_ACLK),
     .AXI_29_ARADDR({AXI_29_ARADDR[32:28], 4'b0000, AXI_29_ARADDR[27:0]}),
     .AXI_29_ARBURST(AXI_29_ARBURST),
-    .AXI_29_ARESET_N(AXI_29_ARESET_N & enabled_29),
+    .AXI_29_ARESET_N(NATIVE_READY_RESET ? enabled_29 : AXI_29_ARESET_N & enabled_29),
     .AXI_29_ARID(AXI_29_ARID),
     .AXI_29_ARLEN(AXI_29_ARLEN),
     .AXI_29_ARSIZE(AXI_29_ARSIZE),
@@ -3476,7 +3543,7 @@ HBM_TWO_STACK_INTF #(
     .AXI_30_ACLK(AXI_30_ACLK),
     .AXI_30_ARADDR({AXI_30_ARADDR[32:28], 4'b0000, AXI_30_ARADDR[27:0]}),
     .AXI_30_ARBURST(AXI_30_ARBURST),
-    .AXI_30_ARESET_N(AXI_30_ARESET_N & enabled_30),
+    .AXI_30_ARESET_N(NATIVE_READY_RESET ? enabled_30 : AXI_30_ARESET_N & enabled_30),
     .AXI_30_ARID(AXI_30_ARID),
     .AXI_30_ARLEN(AXI_30_ARLEN),
     .AXI_30_ARSIZE(AXI_30_ARSIZE),
@@ -3498,7 +3565,7 @@ HBM_TWO_STACK_INTF #(
     .AXI_31_ACLK(AXI_31_ACLK),
     .AXI_31_ARADDR({AXI_31_ARADDR[32:28], 4'b0000, AXI_31_ARADDR[27:0]}),
     .AXI_31_ARBURST(AXI_31_ARBURST),
-    .AXI_31_ARESET_N(AXI_31_ARESET_N & enabled_31),
+    .AXI_31_ARESET_N(NATIVE_READY_RESET ? enabled_31 : AXI_31_ARESET_N & enabled_31),
     .AXI_31_ARID(AXI_31_ARID),
     .AXI_31_ARLEN(AXI_31_ARLEN),
     .AXI_31_ARSIZE(AXI_31_ARSIZE),
