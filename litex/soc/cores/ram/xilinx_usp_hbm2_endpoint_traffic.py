@@ -336,7 +336,9 @@ class HBMEndpointTrafficCSR(LiteXModule):
         terms = [endpoint.w.strb[bit] for bit in range(64)]
         while len(terms) > 1:
             terms = [terms[i] + terms[i + 1] for i in range(0, len(terms), 2)]
-        byte_count = terms[0]
+        # Bound popcount sizing before the wider accumulator expression.
+        byte_count = Signal(7)
+        self.comb += byte_count.eq(terms[0])
         # At most 64 bytes arrive per word. Keep the low-word carry separate
         # from the high-word increment and saturate only the low word: the
         # high word already contains all ones when the whole count overflows.

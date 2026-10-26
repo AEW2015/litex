@@ -168,7 +168,7 @@ class HBMRegisteredReadCDC(LiteXModule):
 class HBMWideEndpoint(LiteXModule):
     def __init__(self, *, app_domain="sys", native_domain="axi", address_width=33,
                  id_width=6, fifo_depth=4, gray_bus_prefix=None, max_outstanding=1,
-                 control_prefix=""):
+                 control_prefix="", native_pipe_ready=False):
         # Control instance names must be unique when multiple windows coexist;
         # Gray publication tags retain their separate caller-selected prefix.
         if not isinstance(control_prefix, str):
@@ -181,7 +181,7 @@ class HBMWideEndpoint(LiteXModule):
                 app_domain=app_domain, native_domain=native_domain,
                 address_width=address_width, id_width=id_width,
                 fifo_depth=fifo_depth, gray_bus_prefix=gray_bus_prefix,
-                control_prefix=control_prefix)
+                control_prefix=control_prefix, native_pipe_ready=native_pipe_ready)
             for name in ("aw", "ar", "w", "b", "r", "native", "quiesce", "drained",
                          "quiesced", "protocol_error", "write_pending", "read_pending",
                          "link_ready", "write_credits", "read_credits"):
@@ -279,7 +279,8 @@ class HBMWideEndpoint(LiteXModule):
         # Registered native boundary; AW and W acceptance remain independent.
         buffers = {}
         for name in ("aw", "w", "ar", "b", "r"):
-            buf = ClockDomainsRenamer(native_domain)(stream.Buffer(getattr(n, name).description))
+            buf = ClockDomainsRenamer(native_domain)(stream.Buffer(
+                getattr(n, name).description, pipe_ready=native_pipe_ready and name in ("aw", "w", "ar")))
             setattr(self.submodules, name + "_buffer", buf)
             buffers[name] = buf
         self.comb += [buffers["aw"].source.connect(n.aw), buffers["w"].source.connect(n.w),
@@ -396,7 +397,7 @@ class _HBMWindowFourEndpoint(LiteXModule):
     only at application consumption. This is not an AXI reordering engine.
     """
     def __init__(self, *, app_domain, native_domain, address_width, id_width,
-                 fifo_depth, gray_bus_prefix, control_prefix):
+                 fifo_depth, gray_bus_prefix, control_prefix, native_pipe_ready):
         if app_domain == native_domain or address_width < 12 or id_width < 1 or fifo_depth != 4:
             raise ValueError("Window four requires distinct domains, address>=12, ID>=1 and depth four")
         desc = [("addr", address_width), ("len", 4), ("id", id_width)]
@@ -508,7 +509,8 @@ class _HBMWindowFourEndpoint(LiteXModule):
         tokens = {name:queue(name + "_accepted", [("token", 1)], native_domain) for name in ("aw", "w", "ar")}
         buffers = {}
         for name in ("aw", "w", "ar", "b", "r"):
-            buffers[name] = ClockDomainsRenamer(native_domain)(stream.Buffer(getattr(n, name).description))
+            buffers[name] = ClockDomainsRenamer(native_domain)(stream.Buffer(
+                getattr(n, name).description, pipe_ready=native_pipe_ready and name in ("aw", "w", "ar")))
             setattr(self.submodules, name + "_buffer", buffers[name])
         for name, commands in [("aw", aw_issue), ("ar", ar_issue)]:
             buf, port, token = buffers[name], getattr(n, name), tokens[name]
