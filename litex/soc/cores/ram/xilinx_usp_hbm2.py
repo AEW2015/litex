@@ -338,22 +338,26 @@ class PrimitiveHBM2(USPHBM2):
     The 200 MHz reference profile boots at 900 MHz HBM. Software may select
     800/900 MHz only through complete destructive reset and recalibration.
     The primitive model remains at its supported 1800 MT/s maximum.
+    The explicit 500/1000 experiment changes operating clocks without claiming
+    that the primitive timing model supports that operating point.
     """
 
     def __init__(self, platform, hbm_ip_name="hbm_0", *, rtl_dir=None,
                  stacks=2, hbm_clk_freq=900e6, axi_clk_freq=250e6, sys_clk_freq=250e6,
-                 ref_clk_freq=200e6, apb_clk_freq=100e6, with_native_ready=True):
+                 ref_clk_freq=200e6, apb_clk_freq=100e6, with_native_ready=True,
+                 experimental_500_1000=False):
         expected = {
             "stacks": (stacks, 2),
-            "hbm_clk_freq": (hbm_clk_freq, 900e6),
+            "hbm_clk_freq": (hbm_clk_freq, 1000e6 if experimental_500_1000 else 900e6),
             "ref_clk_freq": (ref_clk_freq, 200e6),
             "apb_clk_freq": (apb_clk_freq, 100e6),
         }
         for name, (actual, required) in expected.items():
             if actual != required:
                 raise ValueError(f"FK33 primitive profile requires {name}={required!r}")
-        if (sys_clk_freq, axi_clk_freq) not in ((250e6, 250e6), (200e6, 400e6)):
-            raise ValueError("FK33 primitive clocks require SYS250/AXI250 or SYS200/AXI400")
+        clocks = ((250e6, 500e6),) if experimental_500_1000 else ((250e6, 250e6), (200e6, 400e6))
+        if (sys_clk_freq, axi_clk_freq) not in clocks:
+            raise ValueError(f"FK33 primitive SYS/AXI clocks require one of {clocks}")
         self.sys_clk_freq = sys_clk_freq
         if hbm_ip_name != "hbm_0":
             raise ValueError("The tested primitive RTL module is named hbm_0")
@@ -375,10 +379,10 @@ class PrimitiveHBM2(USPHBM2):
 
         # Constants describe the boot profile and supported tool model, not a
         # measured clock. Firmware reports the active destructive profile.
-        self.operating_clock_mhz = CSRConstant(900, name="operating_clock_mhz")
-        self.operating_data_rate_mt_s = CSRConstant(1800, name="operating_data_rate_mt_s")
+        self.operating_clock_mhz = CSRConstant(int(hbm_clk_freq / 1e6), name="operating_clock_mhz")
+        self.operating_data_rate_mt_s = CSRConstant(int(2 * hbm_clk_freq / 1e6), name="operating_data_rate_mt_s")
         self.model_data_rate_mt_s = CSRConstant(1800, name="model_data_rate_mt_s")
-        self.experimental_overclock = CSRConstant(0, name="experimental_overclock")
+        self.experimental_overclock = CSRConstant(int(experimental_500_1000), name="experimental_overclock")
 
         self.control_bus = csr_bus.Interface(data_width=32, address_width=14)
         self.sw_ready = Signal(2, name="hbm_sw_ready")
