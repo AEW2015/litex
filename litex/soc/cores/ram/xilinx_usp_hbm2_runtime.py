@@ -224,7 +224,7 @@ class HBMRuntimeQuiesce(LiteXModule):
                                       (self.error.status != 0) | self.external_fault)),
         ]
 
-    def add_port(self, channel, upstream, downstream, *, host_idle):
+    def add_port(self, channel, upstream, downstream, *, host_idle, downstream_idle=1):
         if channel not in self.channels or channel in self._ports:
             raise ValueError("Runtime ports must be unique members of PC0-31")
         for interface in (upstream, downstream):
@@ -241,7 +241,7 @@ class HBMRuntimeQuiesce(LiteXModule):
         else:
             self.comb += port_request.eq(self.native_quiesce_request & host_idle)
         self.comb += [
-            self._native_drained[channel].eq(native_drained & host_idle),
+            self._native_drained[channel].eq(native_drained & host_idle & downstream_idle),
             upstream.ar.connect(downstream.ar, omit={"valid", "ready"}),
             upstream.aw.connect(downstream.aw, omit={"valid", "ready"}),
             upstream.w.connect(downstream.w, omit={"valid", "ready"}),
