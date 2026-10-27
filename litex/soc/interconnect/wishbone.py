@@ -792,8 +792,8 @@ class SRAM(LiteXModule):
 
 class Wishbone2CSR(LiteXModule):
     def __init__(self, bus_wishbone=None, bus_csr=None, register=True, read_latency=1):
-        if read_latency not in (1, 2) or (read_latency != 1 and not register):
-            raise ValueError("Pipelined CSR reads require registered access and latency 1 or 2")
+        if read_latency not in (1, 2, 3) or (read_latency != 1 and not register):
+            raise ValueError("Pipelined CSR reads require registered access and latency 1, 2 or 3")
         self.csr = bus_csr
         if self.csr is None:
             # If no CSR bus provided, create it with default parameters.
@@ -868,12 +868,14 @@ class Wishbone2CSR(LiteXModule):
                 NextValue(self.csr.we, 0),
                 NextState("ACK" if read_latency == 1 else "READ-WAIT")
             )
-            if read_latency == 2:
+            if read_latency >= 2:
                 # Keep the address through both read clocks, including for
                 # single-cycle banks and raw CSR peripherals sharing this bus.
-                fsm.act("READ-WAIT", NextState("ACK"))
+                fsm.act("READ-WAIT", NextState("ACK" if read_latency == 2 else "READ-WAIT2"))
+            if read_latency == 3:
+                fsm.act("READ-WAIT2", NextState("ACK"))
             fsm.act("ACK",
-                *([NextValue(self.csr.adr, 0)] if read_latency == 2 else []),
+                *([NextValue(self.csr.adr, 0)] if read_latency >= 2 else []),
                 self.wishbone.ack.eq(1),
                 self.wishbone.dat_r.eq(0),
                 Case(selected_r, {

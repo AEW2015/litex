@@ -192,7 +192,7 @@ class SRAM(Module):
 # CSR Bank -----------------------------------------------------------------------------------------
 
 class CSRBank(csr.GenericBank):
-    def __init__(self, description, address=0, bus=None, paging=0x800, ordering="big", read_pipeline=False):
+    def __init__(self, description, address=0, bus=None, paging=0x800, ordering="big", read_pipeline=False, read_sample=False):
         if bus is None:
             bus = Interface()
         self.bus = bus
@@ -218,24 +218,37 @@ class CSRBank(csr.GenericBank):
                 )
             ]
 
+        if read_sample and not read_pipeline:
+            raise ValueError("CSR read sampling requires the pipelined read mux")
         if read_pipeline:
-            # Two CSR clocks: local 16-word muxes, then the group mux. The
-            # upstream bridge must allow this extra read clock before ACK.
+            # Two CSR clocks: local 16-word muxes, then the group mux. Optional
+            # input sampling adds a third clock; the bridge must match ACK.
             group_words = 16
             if aligned_paging < group_words:
                 raise ValueError("Pipelined CSR reads require at least 16 address slots")
+            read_address, read_selected = self.bus.adr, sel
+            read_words = [c.rd_data for c in self.simple_csrs]
+            if read_sample:
+                read_address = Signal.like(self.bus.adr)
+                read_selected = Signal()
+                self.sync += [read_address.eq(self.bus.adr), read_selected.eq(sel)]
+                read_words = []
+                for c in self.simple_csrs:
+                    sample = Signal(c.size)
+                    self.sync += sample.eq(c.rd_data)
+                    read_words.append(sample)
             groups = []
             group_sel = Signal(max=max(2, aligned_paging//group_words))
             bank_sel = Signal()
             self.sync += [
-                group_sel.eq(self.bus.adr[4:log2_int(aligned_paging)]),
-                bank_sel.eq(sel),
+                group_sel.eq(read_address[4:log2_int(aligned_paging)]),
+                bank_sel.eq(read_selected),
             ]
             for start in range(0, len(self.simple_csrs), group_words):
                 data = Signal.like(self.bus.dat_r)
-                cases = {i: data.eq(c.rd_data)
-                    for i, c in enumerate(self.simple_csrs[start:start + group_words])}
-                self.sync += [data.eq(0), Case(self.bus.adr[:4], cases)]
+                cases = {i: data.eq(word)
+                    for i, word in enumerate(read_words[start:start + group_words])}
+                self.sync += [data.eq(0), Case(read_address[:4], cases)]
                 groups.append(data)
             self.sync += [
                 self.bus.dat_r.eq(0),
@@ -258,12 +271,13 @@ class CSRBank(csr.GenericBank):
 # scan(), so it can have side effects.
 
 class CSRBankArray(Module):
-    def __init__(self, source, address_map, *ifargs, paging=0x800, ordering="big", read_pipeline=False, **ifkwargs):
+    def __init__(self, source, address_map, *ifargs, paging=0x800, ordering="big", read_pipeline=False, read_sample=False, **ifkwargs):
         self.source             = source
         self.address_map        = address_map
         self.paging             = paging
         self.ordering           = ordering
         self.read_pipeline      = read_pipeline
+        self.read_sample        = read_sample
         self.scan(ifargs, ifkwargs)
 
     def scan(self, ifargs, ifkwargs):
@@ -326,7 +340,8 @@ class CSRBankArray(Module):
                     bus                = bank_bus,
                     paging             = self.paging,
                     ordering           = self.ordering,
-                    read_pipeline      = self.read_pipeline)
+                    read_pipeline      = self.read_pipeline,
+                    read_sample        = self.read_sample)
                 self.submodules += rmap
                 self.banks.append((name, csrs, mapaddr, rmap))
 
