@@ -880,15 +880,20 @@ class Monitor(LiteXModule):
 
 class PipeValid(LiteXModule):
     """Pipe valid/payload to cut timing path"""
-    def __init__(self, layout):
+    def __init__(self, layout, enable_max_fanout=None):
         self.sink   = sink   = Endpoint(layout)
         self.source = source = Endpoint(layout)
 
         # # #
 
         # Pipe when source is not valid or is ready.
+        enable = ~source.valid | source.ready
+        if enable_max_fanout is not None:
+            enable = Signal()
+            enable.attr.add(("max_fanout", enable_max_fanout))
+            self.comb += enable.eq(~source.valid | source.ready)
         self.sync += [
-            If(~source.valid | source.ready,
+            If(enable,
                 source.valid.eq(sink.valid),
                 source.first.eq(sink.first),
                 source.last.eq(sink.last),
@@ -896,12 +901,12 @@ class PipeValid(LiteXModule):
                 source.param.eq(sink.param),
             )
         ]
-        self.comb += sink.ready.eq(~source.valid | source.ready)
+        self.comb += sink.ready.eq(enable)
 
 
 class PipeReady(LiteXModule):
     """Pipe ready to cut timing path"""
-    def __init__(self, layout):
+    def __init__(self, layout, capture_when_empty=False):
         self.sink   = sink   = Endpoint(layout)
         self.source = source = Endpoint(layout)
 
@@ -916,7 +921,7 @@ class PipeReady(LiteXModule):
             ).Elif(source.ready,
                 valid.eq(0)
             ),
-            If(~source.ready & ~valid,
+            If(~valid if capture_when_empty else ~source.ready & ~valid,
                 sink_d.eq(sink)
             )
         ]
@@ -933,7 +938,9 @@ class PipeReady(LiteXModule):
 
 class Buffer(LiteXModule):
     """Pipe valid/payload and/or ready to cut timing path"""
-    def __init__(self, layout, pipe_valid=True, pipe_ready=False):
+    def __init__(self, layout, pipe_valid=True, pipe_ready=False,
+                 pipe_ready_capture_when_empty=False, pipe_ready_first=False,
+                 pipe_valid_enable_max_fanout=None):
         self.sink   = sink   = Endpoint(layout)
         self.source = source = Endpoint(layout)
 
@@ -943,15 +950,17 @@ class Buffer(LiteXModule):
 
         # Pipe Valid (Optional).
         if pipe_valid:
-            self.pipe_valid = PipeValid(layout)
+            self.pipe_valid = PipeValid(layout, enable_max_fanout=pipe_valid_enable_max_fanout)
             pipeline.append(self.pipe_valid)
 
         # Pipe Ready (Optional).
         if pipe_ready:
-            self.pipe_ready = PipeReady(layout)
+            self.pipe_ready = PipeReady(layout, capture_when_empty=pipe_ready_capture_when_empty)
             pipeline.append(self.pipe_ready)
 
         # Buffer Pipeline.
+        if pipe_ready_first:
+            pipeline.reverse()
         self.pipeline = Pipeline(
             sink,
             *pipeline,

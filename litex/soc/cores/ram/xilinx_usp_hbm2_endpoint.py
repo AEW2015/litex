@@ -234,7 +234,8 @@ class HBMWideEndpoint(LiteXModule):
         # The CDC already registers data. Cut the gearbox-ready to FIFO
         # read-address loop with a standard one-word elastic skid stage.
         self.submodules.write_elastic = write_elastic = ClockDomainsRenamer(native_domain)(
-            stream.Buffer(wide_w, pipe_valid=False, pipe_ready=True))
+            stream.Buffer(wide_w, pipe_valid=False, pipe_ready=True,
+                pipe_ready_capture_when_empty=native_pipe_ready))
         self.comb += [w.source.connect(write_elastic.sink),
                       write_elastic.source.connect(unpack.sink), pack.source.connect(r.sink)]
         app_error, native_error, native_error_app = Signal(), Signal(), Signal()
@@ -280,7 +281,8 @@ class HBMWideEndpoint(LiteXModule):
         buffers = {}
         for name in ("aw", "w", "ar", "b", "r"):
             buf = ClockDomainsRenamer(native_domain)(stream.Buffer(
-                getattr(n, name).description, pipe_ready=native_pipe_ready and name in ("aw", "w", "ar")))
+                getattr(n, name).description, pipe_ready=native_pipe_ready and name in ("aw", "w", "ar"),
+                pipe_ready_capture_when_empty=native_pipe_ready and name in ("aw", "w", "ar")))
             setattr(self.submodules, name + "_buffer", buf)
             buffers[name] = buf
         self.comb += [buffers["aw"].source.connect(n.aw), buffers["w"].source.connect(n.w),
@@ -487,7 +489,8 @@ class _HBMWindowFourEndpoint(LiteXModule):
         self.submodules.unpack = unpack = HBMWriteUnpacker(
             clock_domain=native_domain, control_prefix=control_prefix)
         self.submodules.pack = pack = ClockDomainsRenamer(native_domain)(stream.StrideConverter(small_r, wide_r))
-        self.submodules.write_elastic = elastic = ClockDomainsRenamer(native_domain)(stream.Buffer(wide_w, pipe_valid=False, pipe_ready=True))
+        self.submodules.write_elastic = elastic = ClockDomainsRenamer(native_domain)(stream.Buffer(wide_w, pipe_valid=False, pipe_ready=True,
+                pipe_ready_capture_when_empty=native_pipe_ready))
         self.comb += [w.source.connect(elastic.sink), elastic.source.connect(unpack.sink), pack.source.connect(r.sink)]
         aw_issue, w_issue, b_expect = [queue(name, desc, native_domain) for name in ("aw_issue", "w_issue", "b_expect")]
         ar_issue, r_expect = [queue(name, desc, native_domain) for name in ("ar_issue", "r_expect")]
@@ -510,7 +513,8 @@ class _HBMWindowFourEndpoint(LiteXModule):
         buffers = {}
         for name in ("aw", "w", "ar", "b", "r"):
             buffers[name] = ClockDomainsRenamer(native_domain)(stream.Buffer(
-                getattr(n, name).description, pipe_ready=native_pipe_ready and name in ("aw", "w", "ar")))
+                getattr(n, name).description, pipe_ready=native_pipe_ready and name in ("aw", "w", "ar"),
+                pipe_ready_capture_when_empty=native_pipe_ready and name in ("aw", "w", "ar")))
             setattr(self.submodules, name + "_buffer", buffers[name])
         for name, commands in [("aw", aw_issue), ("ar", ar_issue)]:
             buf, port, token = buffers[name], getattr(n, name), tokens[name]

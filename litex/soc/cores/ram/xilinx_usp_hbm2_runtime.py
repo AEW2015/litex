@@ -113,11 +113,14 @@ class HBMRuntimeQuiesce(LiteXModule):
     Separate-domain mode keeps CSRs in SYS. STOP completion requires the
     current request generation, the board admission/idle barrier and a coherent
     returned native snapshot. An open idle observation does not require STOP.
+    Optional registered status adds one source clock to the published snapshot;
+    live native admission, drain and fault controls retain their existing paths.
     """
     CHANNELS = tuple(range(32))
 
     def __init__(self, platform, channels=CHANNELS, *, registered_request=False,
-                 registered_completions=False, clock_domain="sys", sys_host_idle=None):
+                 registered_completions=False, clock_domain="sys", sys_host_idle=None,
+                 registered_status=False):
         if tuple(channels) != self.CHANNELS:
             raise ValueError("Runtime interposer requires native channels 0 through 31")
         self.clock_domain = clock_domain
@@ -185,11 +188,39 @@ class HBMRuntimeQuiesce(LiteXModule):
                     sent_generation.eq(generation)),
             ]
             self.specials += MultiReg(self.external_fault, self._native_fault, clock_domain)
-            hbm_status_snapshot(self, [(self._native_drained, drained_snapshot),
-                                      (self._native_error, self.error.status),
-                                      (self.native_quiesced, self._quiesced_sys),
-                                      (self.native_all_drained, self._all_drained_sys),
-                                      (self.request_mailbox.output[1:], snapshot_generation)], clock_domain)
+            status_drained = self._native_drained
+            status_error = self._native_error
+            status_quiesced = self.native_quiesced
+            status_all_drained = self.native_all_drained
+            status_generation = self.request_mailbox.output[1:]
+            if registered_status:
+                # Capture all raw fields together before the global reductions.
+                # Flags and their generation must describe this same image.
+                self.status_image = status_image = Signal(99)
+                native_sync += status_image.eq(Cat(
+                    self._native_drained, self._native_error,
+                    self.request_generation_native, self.native_quiesce_request,
+                    self._native_fault,
+                    self.host_barrier_generation_native == self.request_generation_native))
+                status_drained = status_image[:32]
+                status_error = status_image[32:64]
+                status_generation = status_image[64:96]
+                status_request = status_image[96]
+                status_fault = status_image[97]
+                status_barrier_current = status_image[98]
+                status_all_drained = Signal()
+                status_quiesced = Signal()
+                self.comb += [
+                    status_all_drained.eq((status_drained == 0xffffffff) &
+                        (~status_request | status_barrier_current)),
+                    status_quiesced.eq(status_request & status_all_drained &
+                        (status_error == 0) & ~status_fault),
+                ]
+            hbm_status_snapshot(self, [(status_drained, drained_snapshot),
+                                      (status_error, self.error.status),
+                                      (status_quiesced, self._quiesced_sys),
+                                      (status_all_drained, self._all_drained_sys),
+                                      (status_generation, snapshot_generation)], clock_domain)
         else:
             self.request_acknowledged = Signal(reset=1)
             self.comb += [self.native_quiesce_request.eq(self.quiesce_request),
