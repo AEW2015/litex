@@ -168,7 +168,7 @@ class HBMRegisteredReadCDC(LiteXModule):
 class HBMWideEndpoint(LiteXModule):
     def __init__(self, *, app_domain="sys", native_domain="axi", address_width=33,
                  id_width=6, fifo_depth=4, gray_bus_prefix=None, max_outstanding=1,
-                 control_prefix="", native_pipe_ready=False):
+                 control_prefix="", native_pipe_ready=False, registered_quiesce_ack=False):
         # Control instance names must be unique when multiple windows coexist;
         # Gray publication tags retain their separate caller-selected prefix.
         if not isinstance(control_prefix, str):
@@ -181,7 +181,8 @@ class HBMWideEndpoint(LiteXModule):
                 app_domain=app_domain, native_domain=native_domain,
                 address_width=address_width, id_width=id_width,
                 fifo_depth=fifo_depth, gray_bus_prefix=gray_bus_prefix,
-                control_prefix=control_prefix, native_pipe_ready=native_pipe_ready)
+                control_prefix=control_prefix, native_pipe_ready=native_pipe_ready,
+                registered_quiesce_ack=registered_quiesce_ack)
             for name in ("aw", "ar", "w", "b", "r", "native", "quiesce", "drained",
                          "quiesced", "protocol_error", "write_pending", "read_pending",
                          "link_ready", "write_credits", "read_credits"):
@@ -235,7 +236,8 @@ class HBMWideEndpoint(LiteXModule):
         # read-address loop with a standard one-word elastic skid stage.
         self.submodules.write_elastic = write_elastic = ClockDomainsRenamer(native_domain)(
             stream.Buffer(wide_w, pipe_valid=False, pipe_ready=True,
-                pipe_ready_capture_when_empty=native_pipe_ready))
+                pipe_ready_capture_when_empty=native_pipe_ready,
+                pipe_ready_valid_max_fanout=64 if native_pipe_ready else None))
         self.comb += [w.source.connect(write_elastic.sink),
                       write_elastic.source.connect(unpack.sink), pack.source.connect(r.sink)]
         app_error, native_error, native_error_app = Signal(), Signal(), Signal()
@@ -282,7 +284,8 @@ class HBMWideEndpoint(LiteXModule):
         for name in ("aw", "w", "ar", "b", "r"):
             buf = ClockDomainsRenamer(native_domain)(stream.Buffer(
                 getattr(n, name).description, pipe_ready=native_pipe_ready and name in ("aw", "w", "ar"),
-                pipe_ready_capture_when_empty=native_pipe_ready and name in ("aw", "w", "ar")))
+                pipe_ready_capture_when_empty=native_pipe_ready and name in ("aw", "w", "ar"),
+                pipe_ready_valid_max_fanout=64 if native_pipe_ready and name in ("aw", "w", "ar") else None))
             setattr(self.submodules, name + "_buffer", buf)
             buffers[name] = buf
         self.comb += [buffers["aw"].source.connect(n.aw), buffers["w"].source.connect(n.w),
@@ -382,14 +385,26 @@ class HBMWideEndpoint(LiteXModule):
             ~write_elastic.source.valid & ~unpack.source.valid & ~pack.source.valid &
             ~buffers["aw"].source.valid & ~wb.source.valid &
             ~buffers["ar"].source.valid & ~bb.source.valid & ~rb.source.valid)
+        # The request update marks a coherent token. Wait one native edge before
+        # sending it, including when a new token arrives beside an old pending ACK.
+        ack_pending = Signal(reset=1) if registered_quiesce_ack else None
         self.comb += [request.data.eq(payload),
             request.send.eq((previous_q == self.quiesce) & ~request.busy &
                 (~request_valid | (request_sent != payload))),
             ack.data.eq(request.output),
-            ack.send.eq(idle_native & ~ack.busy & (~ack_valid | (ack_sent != request.output))),
+            ack.send.eq(idle_native & ~ack.busy &
+                (ack_pending & ~request.update if registered_quiesce_ack else
+                 (~ack_valid | (ack_sent != request.output)))),
             self.quiesced.eq(self.link_ready & self.quiesce & (previous_q == self.quiesce) &
                 self.drained & (ack.output == payload) & ~self.protocol_error)]
-        native += If(ack.send & ~ack.busy, ack_sent.eq(request.output), ack_valid.eq(1))
+        if registered_quiesce_ack:
+            native += If(request.update,
+                ack_pending.eq(1),
+            ).Elif(ack.send & ~ack.busy,
+                ack_pending.eq(0),
+            )
+        else:
+            native += If(ack.send & ~ack.busy, ack_sent.eq(request.output), ack_valid.eq(1))
 
 
 class _HBMWindowFourEndpoint(LiteXModule):
@@ -399,7 +414,7 @@ class _HBMWindowFourEndpoint(LiteXModule):
     only at application consumption. This is not an AXI reordering engine.
     """
     def __init__(self, *, app_domain, native_domain, address_width, id_width,
-                 fifo_depth, gray_bus_prefix, control_prefix, native_pipe_ready):
+                 fifo_depth, gray_bus_prefix, control_prefix, native_pipe_ready, registered_quiesce_ack):
         if app_domain == native_domain or address_width < 12 or id_width < 1 or fifo_depth != 4:
             raise ValueError("Window four requires distinct domains, address>=12, ID>=1 and depth four")
         desc = [("addr", address_width), ("len", 4), ("id", id_width)]
@@ -490,7 +505,8 @@ class _HBMWindowFourEndpoint(LiteXModule):
             clock_domain=native_domain, control_prefix=control_prefix)
         self.submodules.pack = pack = ClockDomainsRenamer(native_domain)(stream.StrideConverter(small_r, wide_r))
         self.submodules.write_elastic = elastic = ClockDomainsRenamer(native_domain)(stream.Buffer(wide_w, pipe_valid=False, pipe_ready=True,
-                pipe_ready_capture_when_empty=native_pipe_ready))
+                pipe_ready_capture_when_empty=native_pipe_ready,
+                pipe_ready_valid_max_fanout=64 if native_pipe_ready else None))
         self.comb += [w.source.connect(elastic.sink), elastic.source.connect(unpack.sink), pack.source.connect(r.sink)]
         aw_issue, w_issue, b_expect = [queue(name, desc, native_domain) for name in ("aw_issue", "w_issue", "b_expect")]
         ar_issue, r_expect = [queue(name, desc, native_domain) for name in ("ar_issue", "r_expect")]
@@ -514,7 +530,8 @@ class _HBMWindowFourEndpoint(LiteXModule):
         for name in ("aw", "w", "ar", "b", "r"):
             buffers[name] = ClockDomainsRenamer(native_domain)(stream.Buffer(
                 getattr(n, name).description, pipe_ready=native_pipe_ready and name in ("aw", "w", "ar"),
-                pipe_ready_capture_when_empty=native_pipe_ready and name in ("aw", "w", "ar")))
+                pipe_ready_capture_when_empty=native_pipe_ready and name in ("aw", "w", "ar"),
+                pipe_ready_valid_max_fanout=64 if native_pipe_ready and name in ("aw", "w", "ar") else None))
             setattr(self.submodules, name + "_buffer", buffers[name])
         for name, commands in [("aw", aw_issue), ("ar", ar_issue)]:
             buf, port, token = buffers[name], getattr(n, name), tokens[name]
@@ -582,7 +599,19 @@ class _HBMWindowFourEndpoint(LiteXModule):
         for q in [aw_issue, w_issue, b_expect, ar_issue, r_expect] + list(tokens.values()): idle = idle & (q.level == 0) & ~q.source.valid
         for buf in buffers.values(): idle = idle & ~buf.source.valid
         for accepted in dispatch_states: idle = idle & (accepted == 0)
+        # The request update marks a coherent token. Wait one native edge before
+        # sending it, including when a new token arrives beside an old pending ACK.
+        ack_pending = Signal(reset=1) if registered_quiesce_ack else None
         self.comb += [request.data.eq(payload), request.send.eq((previous == self.quiesce) & ~request.busy & (~request_valid | (request_sent != payload))),
-            ack.data.eq(request.output), ack.send.eq(idle & ~ack.busy & (~ack_valid | (ack_sent != request.output))),
+            ack.data.eq(request.output), ack.send.eq(idle & ~ack.busy &
+                (ack_pending & ~request.update if registered_quiesce_ack else
+                 (~ack_valid | (ack_sent != request.output)))),
             self.quiesced.eq(self.link_ready & self.quiesce & (previous == self.quiesce) & self.drained & (ack.output == payload) & ~self.protocol_error)]
-        native += If(ack.send & ~ack.busy, ack_sent.eq(request.output), ack_valid.eq(1))
+        if registered_quiesce_ack:
+            native += If(request.update,
+                ack_pending.eq(1),
+            ).Elif(ack.send & ~ack.busy,
+                ack_pending.eq(0),
+            )
+        else:
+            native += If(ack.send & ~ack.busy, ack_sent.eq(request.output), ack_valid.eq(1))

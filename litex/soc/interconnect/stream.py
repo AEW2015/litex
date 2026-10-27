@@ -906,7 +906,7 @@ class PipeValid(LiteXModule):
 
 class PipeReady(LiteXModule):
     """Pipe ready to cut timing path"""
-    def __init__(self, layout, capture_when_empty=False):
+    def __init__(self, layout, capture_when_empty=False, valid_max_fanout=None):
         self.sink   = sink   = Endpoint(layout)
         self.source = source = Endpoint(layout)
 
@@ -914,6 +914,14 @@ class PipeReady(LiteXModule):
 
         valid  = Signal()
         sink_d = Endpoint(layout)
+        if valid_max_fanout is not None:
+            valid.attr.add(("max_fanout", valid_max_fanout))
+
+        capture = ~valid if capture_when_empty else ~source.ready & ~valid
+        if valid_max_fanout is not None:
+            capture = Signal()
+            capture.attr.add(("max_fanout", valid_max_fanout))
+            self.comb += capture.eq(~valid if capture_when_empty else ~source.ready & ~valid)
 
         self.sync += [
             If(sink.valid & ~source.ready,
@@ -921,7 +929,7 @@ class PipeReady(LiteXModule):
             ).Elif(source.ready,
                 valid.eq(0)
             ),
-            If(~valid if capture_when_empty else ~source.ready & ~valid,
+            If(capture,
                 sink_d.eq(sink)
             )
         ]
@@ -940,7 +948,7 @@ class Buffer(LiteXModule):
     """Pipe valid/payload and/or ready to cut timing path"""
     def __init__(self, layout, pipe_valid=True, pipe_ready=False,
                  pipe_ready_capture_when_empty=False, pipe_ready_first=False,
-                 pipe_valid_enable_max_fanout=None):
+                 pipe_valid_enable_max_fanout=None, pipe_ready_valid_max_fanout=None):
         self.sink   = sink   = Endpoint(layout)
         self.source = source = Endpoint(layout)
 
@@ -955,7 +963,8 @@ class Buffer(LiteXModule):
 
         # Pipe Ready (Optional).
         if pipe_ready:
-            self.pipe_ready = PipeReady(layout, capture_when_empty=pipe_ready_capture_when_empty)
+            self.pipe_ready = PipeReady(layout, capture_when_empty=pipe_ready_capture_when_empty,
+                valid_max_fanout=pipe_ready_valid_max_fanout)
             pipeline.append(self.pipe_ready)
 
         # Buffer Pipeline.
