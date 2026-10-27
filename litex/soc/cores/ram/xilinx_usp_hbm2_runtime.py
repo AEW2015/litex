@@ -120,7 +120,8 @@ class HBMRuntimeQuiesce(LiteXModule):
 
     def __init__(self, platform, channels=CHANNELS, *, registered_request=False,
                  registered_completions=False, clock_domain="sys", sys_host_idle=None,
-                 registered_status=False):
+                 registered_status=False, local_status_pipeline=False,
+                 status_publication_pipeline=False):
         if tuple(channels) != self.CHANNELS:
             raise ValueError("Runtime interposer requires native channels 0 through 31")
         self.clock_domain = clock_domain
@@ -128,6 +129,12 @@ class HBMRuntimeQuiesce(LiteXModule):
         self.channels = tuple(channels)
         self.registered_request = bool(registered_request)
         self.registered_completions = bool(registered_completions)
+        self.local_status_pipeline = bool(local_status_pipeline)
+        self.status_publication_pipeline = bool(status_publication_pipeline)
+        if status_publication_pipeline and not (registered_status and clock_domain != "sys"):
+            raise ValueError("Pipelined publication requires registered status in a separate domain")
+        if local_status_pipeline and not (registered_status and clock_domain != "sys"):
+            raise ValueError("Local status publication requires registered status in a separate domain")
         path = (Path(__file__).resolve().parent / "xilinx_usp_hbm2" /
                 "fk33_hbm_quiesce.sv")
         if not path.is_file():
@@ -153,6 +160,9 @@ class HBMRuntimeQuiesce(LiteXModule):
         self.native_quiesced = Signal()
         self._native_drained, self._native_error = Signal(32), Signal(32)
         self._native_fault = Signal()
+        if self.local_status_pipeline:
+            self._local_status_drained = Signal(32)
+            self._local_status_host_idle = Signal(32)
         self.request_generation_sys = Signal(32)
         self.request_generation_native = Signal(32)
         self.host_barrier_generation_native = Signal(32)
@@ -173,7 +183,8 @@ class HBMRuntimeQuiesce(LiteXModule):
             self.request_acknowledged = Signal()
             drained_snapshot = Signal(32)
             self.comb += [
-                self.drained.status.eq(Mux(self.request_acknowledged & sys_host_idle, drained_snapshot, 0)),
+                self.drained.status.eq(Mux(self.request_acknowledged & sys_host_idle,
+                    (drained_snapshot & ~self.error.status) if status_publication_pipeline else drained_snapshot, 0)),
                 self.request_mailbox.data.eq(Cat(self.quiesce_request, generation)),
                 self.request_mailbox.send.eq(generation != sent_generation),
                 self.native_quiesce_request.eq(self.request_mailbox.output[0]),
@@ -197,11 +208,24 @@ class HBMRuntimeQuiesce(LiteXModule):
                 # Capture all raw fields together before the global reductions.
                 # Flags and their generation must describe this same image.
                 self.status_image = status_image = Signal(99)
-                native_sync += status_image.eq(Cat(
-                    self._native_drained, self._native_error,
-                    self.request_generation_native, self.native_quiesce_request,
-                    self._native_fault,
-                    self.host_barrier_generation_native == self.request_generation_native))
+                if self.local_status_pipeline:
+                    # Drain ingredients and their request/barrier epoch share one
+                    # observation edge. Sticky errors retain their original
+                    # publication cadence and can only suppress an older drain.
+                    self.local_status_meta = status_meta = Signal(35)
+                    native_sync += status_meta.eq(Cat(
+                        self.request_generation_native, self.native_quiesce_request,
+                        self._native_fault,
+                        self.host_barrier_generation_native == self.request_generation_native))
+                    native_sync += status_image.eq(Cat(
+                        self._local_status_drained & self._local_status_host_idle & ~self._native_error,
+                        self._native_error, status_meta))
+                else:
+                    native_sync += status_image.eq(Cat(
+                        self._native_drained, self._native_error,
+                        self.request_generation_native, self.native_quiesce_request,
+                        self._native_fault,
+                        self.host_barrier_generation_native == self.request_generation_native))
                 status_drained = status_image[:32]
                 status_error = status_image[32:64]
                 status_generation = status_image[64:96]
@@ -216,6 +240,16 @@ class HBMRuntimeQuiesce(LiteXModule):
                     status_quiesced.eq(status_request & status_all_drained &
                         (status_error == 0) & ~status_fault),
                 ]
+            if status_publication_pipeline:
+                # Older non-error fields retain one coherent observation epoch.
+                # Errors keep their original mailbox/admission publication cadence.
+                self.status_publication_image = publication = Signal(66)
+                native_sync += publication.eq(Cat(status_drained, status_quiesced,
+                    status_all_drained, status_generation))
+                status_drained = publication[:32]
+                status_quiesced = publication[32]
+                status_all_drained = publication[33]
+                status_generation = publication[34:]
             hbm_status_snapshot(self, [(status_drained, drained_snapshot),
                                       (status_error, self.error.status),
                                       (status_quiesced, self._quiesced_sys),
@@ -266,6 +300,17 @@ class HBMRuntimeQuiesce(LiteXModule):
         self._ports.add(channel)
         native_sync = getattr(self.sync, self.clock_domain)
         native_drained = Signal(name=f"hbm_pc{channel}_axi_drained")
+        if self.local_status_pipeline:
+            local_drained = Signal(name=f"hbm_pc{channel}_status_drained")
+            local_host_idle = Signal(name=f"hbm_pc{channel}_status_host_idle")
+            native_sync += [
+                local_drained.eq(native_drained & downstream_idle),
+                local_host_idle.eq(host_idle),
+            ]
+            self.comb += [
+                self._local_status_drained[channel].eq(local_drained),
+                self._local_status_host_idle[channel].eq(local_host_idle),
+            ]
         port_request = Signal(name=f"hbm_pc{channel}_quiesce_request")
         if self.registered_request:
             native_sync += port_request.eq(self.native_quiesce_request & host_idle)
