@@ -286,6 +286,9 @@ class HBMWideEndpoint(LiteXModule):
                 getattr(n, name).description, pipe_ready=native_pipe_ready and name in ("aw", "w", "ar"),
                 pipe_ready_capture_when_empty=native_pipe_ready and name in ("aw", "w", "ar"),
                 pipe_ready_valid_max_fanout=64 if native_pipe_ready and name in ("aw", "w", "ar") else None))
+            if native_pipe_ready and name == "r":
+                buf.sink.ready.attr.add(("HBM_ENDPOINT_R_CAPTURE", gray_bus_prefix or "hbm_endpoint"))
+                buf.sink.ready.attr.add(("keep", "true"))
             setattr(self.submodules, name + "_buffer", buf)
             buffers[name] = buf
         self.comb += [buffers["aw"].source.connect(n.aw), buffers["w"].source.connect(n.w),
@@ -532,6 +535,9 @@ class _HBMWindowFourEndpoint(LiteXModule):
                 getattr(n, name).description, pipe_ready=native_pipe_ready and name in ("aw", "w", "ar"),
                 pipe_ready_capture_when_empty=native_pipe_ready and name in ("aw", "w", "ar"),
                 pipe_ready_valid_max_fanout=64 if native_pipe_ready and name in ("aw", "w", "ar") else None))
+            if native_pipe_ready and name == "r":
+                buffers[name].sink.ready.attr.add(("HBM_ENDPOINT_R_CAPTURE", gray_bus_prefix or "hbm_endpoint"))
+                buffers[name].sink.ready.attr.add(("keep", "true"))
             setattr(self.submodules, name + "_buffer", buffers[name])
         for name, commands in [("aw", aw_issue), ("ar", ar_issue)]:
             buf, port, token = buffers[name], getattr(n, name), tokens[name]
