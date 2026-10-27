@@ -339,22 +339,26 @@ class HBMEndpointTrafficCSR(LiteXModule):
         # Bound popcount sizing before the wider accumulator expression.
         byte_count = Signal(7)
         self.comb += byte_count.eq(terms[0])
-        # At most 64 bytes arrive per word. Keep the low-word carry separate
-        # from the high-word increment and saturate only the low word: the
-        # high word already contains all ones when the whole count overflows.
-        enabled_low_sum = Signal(33)
+        # A word enables at most 64 bytes: carry prediction needs only a
+        # seven-bit sum and an all-ones test of the registered upper low word.
+        enabled_low_sum = Signal(7)
+        enabled_low_carry = Signal()
         enabled_high_full = Signal()
         self.comb += [
-            enabled_low_sum.eq(Cat(enabled_bytes[:32], Constant(0, 1)) + byte_count),
+            enabled_low_sum.eq(Cat(enabled_bytes[:6], Constant(0, 1)) + byte_count),
+            enabled_low_carry.eq(enabled_low_sum[6] & (enabled_bytes[6:32] == 0x3ffffff)),
             enabled_high_full.eq(enabled_bytes[32:] == 0xffffffff),
         ]
         self.sync += [
             If(start_accept, enabled_bytes.eq(0), aw_seen.eq(0), ar_seen.eq(0)).Else(
                 If(w_fire,
-                    If(enabled_low_sum[32] & enabled_high_full,
-                        enabled_bytes[:32].eq(0xffffffff), overflow.eq(1)
-                    ).Else(enabled_bytes[:32].eq(enabled_low_sum[:32])),
-                    If(enabled_low_sum[32] & ~enabled_high_full,
+                    If(enabled_low_carry & enabled_high_full,
+                        enabled_bytes[:6].eq(0x3f), overflow.eq(1)
+                    ).Else(
+                        enabled_bytes[:6].eq(enabled_low_sum[:6]),
+                        If(enabled_low_sum[6],
+                            enabled_bytes[6:32].eq(enabled_bytes[6:32] + 1))),
+                    If(enabled_low_carry & ~enabled_high_full,
                         enabled_bytes[32:].eq(enabled_bytes[32:] + 1))),
                 If(aw_fire, aw_seen.eq(aw_seen | (1 << aw_length))),
                 If(ar_fire, ar_seen.eq(ar_seen | (1 << ar_length)))),
