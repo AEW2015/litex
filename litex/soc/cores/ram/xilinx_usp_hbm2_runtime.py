@@ -121,7 +121,7 @@ class HBMRuntimeQuiesce(LiteXModule):
     def __init__(self, platform, channels=CHANNELS, *, registered_request=False,
                  registered_completions=False, clock_domain="sys", sys_host_idle=None,
                  registered_status=False, local_status_pipeline=False,
-                 status_publication_pipeline=False):
+                 status_publication_pipeline=False, native_tracker_tags=False):
         if tuple(channels) != self.CHANNELS:
             raise ValueError("Runtime interposer requires native channels 0 through 31")
         self.clock_domain = clock_domain
@@ -131,6 +131,7 @@ class HBMRuntimeQuiesce(LiteXModule):
         self.registered_completions = bool(registered_completions)
         self.local_status_pipeline = bool(local_status_pipeline)
         self.status_publication_pipeline = bool(status_publication_pipeline)
+        self.native_tracker_tags = bool(native_tracker_tags)
         if status_publication_pipeline and not (registered_status and clock_domain != "sys"):
             raise ValueError("Pipelined publication requires registered status in a separate domain")
         if local_status_pipeline and not (registered_status and clock_domain != "sys"):
@@ -324,6 +325,11 @@ class HBMRuntimeQuiesce(LiteXModule):
             downstream.r.connect(upstream.r),
             downstream.b.connect(upstream.b),
         ]
+        tagged_error = None
+        if self.native_tracker_tags:
+            tagged_error = Signal(name=f"hbm_pc{channel}_tracker_error",
+                attr={("keep", "true"), ("hbm_tracker_pc", str(channel))})
+            self.comb += self._native_error[channel].eq(tagged_error)
         self.specials += Instance("fk33_hbm_quiesce",
             p_REGISTERED_COMPLETIONS=int(self.registered_completions),
             i_clk=ClockSignal(self.clock_domain), i_rst=ResetSignal(self.clock_domain),
@@ -340,7 +346,8 @@ class HBMRuntimeQuiesce(LiteXModule):
             i_m_rvalid=downstream.r.valid, i_m_rlast=downstream.r.last,
             i_s_rready=upstream.r.ready,
             i_m_bvalid=downstream.b.valid, i_s_bready=upstream.b.ready,
-            o_drained=native_drained, o_error=self._native_error[channel])
+            o_drained=native_drained,
+            o_error=tagged_error if self.native_tracker_tags else self._native_error[channel])
 
     def do_finalize(self):
         if self._ports != set(self.channels):
