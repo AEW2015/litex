@@ -153,6 +153,7 @@ class XilinxVivadoToolchain(GenericToolchain):
         self.pre_optimize_commands      = XilinxVivadoCommands()
         self.pre_placement_commands     = XilinxVivadoCommands()
         self.pre_routing_commands       = XilinxVivadoCommands()
+        self.post_routing_commands      = XilinxVivadoCommands()
         self.incremental_implementation = False
         self._synth_mode                = "vivado"
         self._enable_xpm                = False
@@ -440,6 +441,7 @@ class XilinxVivadoToolchain(GenericToolchain):
         tcl.append("\n# Routing\n")
         tcl.append(f"route_design -directive {self.vivado_route_directive}")
         tcl.append(f"phys_opt_design -directive {self.vivado_post_route_phys_opt_directive}")
+        tcl.extend(c.format(build_name=self._build_name) for c in self.post_routing_commands.resolve(self._vns))
         tcl.append(f"write_checkpoint -force {self._build_name}_route.dcp")
         tcl.append("\n# Routing report\n")
         tcl.append("report_timing_summary -no_header -no_detailed_paths")
